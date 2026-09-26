@@ -85,6 +85,40 @@ The following security requirements the system must guarantee are listed below, 
 
 # 5. Trust Assumptions
 
+## 5.1 Alice's zone (sender)
+| Component | Trust level | Security assumption (justification) |
+|---|---|---|
+| **Alice (external actor)** | Trusted | Assumed to act in good faith and to only send to recipients of her choosing. The design does not protect against a malicious sender. |
+| **Original file (plaintext)** | Partially trusted | Assumed valid before entering the protection module; its future confidentiality depends entirely on encryption being applied correctly. |
+| **Alice's private key (signature)** | Trusted | Assumed that Alice's device adequately protects it. If this fails, an attacker could sign forged packages impersonating Alice. |
+| **Protection module (AEAD + signature)** | Trusted | Assumed to be correctly implemented (correct primitives, unique nonces) and not modified by an attacker. |
+| **File key generation** | Trusted | A cryptographically secure random number generator (CSPRNG) is assumed. If weak, the system's entire confidentiality would collapse. |
+| **Recipients' public keys** | Partially trusted | Obtained from a channel external to the diagram; assumed to have been obtained authentically (verified out-of-band). If this fails, a MITM attack on key registration occurs. |
+| **Secure package generated** | Trusted → Untrusted once crossing Boundary 1 | Its protection (encryption + signature) is the only thing upholding trust once it leaves the controlled environment. |
+
+## 5.2 Untrusted zone (transfer / storage)
+| Component | Trust level | Security assumption (justification) |
+|---|---|---|
+| **Transfer/storage channel** | Untrusted | By design, the attacker is assumed to have full control: observe, copy, modify, replace, replay, or delete the package. |
+| **Attacker (active/passive)** | Adversary | Full access to the channel/storage is assumed, but not to Alice's or Bob's trust zones. |
+
+## 5.3 Bob/Carol's zone (recipients)
+| Component | Trust level | Security assumption (justification) |
+|---|---|---|
+| **Package received** | Untrusted until verified | Even if it arrives encrypted and signed, it is treated as hostile input until signature and integrity are validated. |
+| **Signature/integrity verification** | Trusted | Assumed that this code is correct and has not been tampered with; it acts as the gatekeeper for the rest of the process. |
+| **Bob's private key** | Trusted | Protected on his device, with no third-party access. |
+| **File key recovery** | Trusted | Depends on Bob's private key being intact and the package having already passed verification. |
+| **AEAD decryption and verification** | Trusted | Assumed to correctly detect any tampering with the ciphertext and to fail securely if authentication fails. |
+| **Recovered original file** | Trusted (conditioned) | Trusted only if all preliminary checks were successful. |
+| **Fail-closed** | Trusted | Assumed that this logic does not reveal sensitive information upon failure and correctly blocks unverified data. |
+
+## 5.4 Cross-cutting assumption (outside the diagram, but critical)
+| Component | Trust level | Security assumption (justification) |
+|---|---|---|
+| **Alice's and Bob's local environment (OS/hardware)** | Trusted, with an explicit caveat | Assumed that no local device is compromised. If the local machine were compromised, no cryptographic protection could prevent the private key or plaintext file from being leaked. |
+
+
 # 6. Attack Surface Review
 
 # 7. Unresolved Security Questions
