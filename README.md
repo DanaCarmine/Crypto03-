@@ -83,6 +83,51 @@ The following security requirements the system must guarantee are listed below, 
 
 # 4. Threat Model
 
+## 4.1 Assets to protect
+
+- File content.
+- File key / file recovery material.
+- Package metadata (name, timestamp, recipient identifier, version).
+- Private keys (Alice's and Bob's).
+- User credentials (keystore passwords).
+- Validity of the digital signature / sender identity.
+- List of authorized recipients.
+
+## 4.2 Adversaries
+
+- External attacker with access to the channel/storage.
+- Malicious recipient attempting to use the system outside authorized boundaries.
+- Attacker modifying metadata to alter the system's behavior.
+- Attacker with temporary access to the device (physical or remote).
+
+## 4.3 What the attacker can do
+
+- Passive observation (eavesdropping) of all traffic/storage in the untrusted channel.
+- Active modification of bits, blocks, or metadata in the package.
+- Replacement/injection: substituting a legitimate package, injecting malformed packages, or replacing a public key.
+- Replay of a previously valid package.
+- Suppression/deletion of packages, affecting availability.
+- Attempting to get the system to accept a fake public key (without physical access to the keystore).
+
+## 4.4 What the attacker cannot do
+
+- No execution or physical access to Alice's or Bob's local OS/hardware.
+- Not assumed capable of breaking the underlying cryptographic primitives.
+
+## 4.5 Mapping: Asset → Threat → Attack Scenario → Security Requirement → Design Constraint
+
+| Asset | Threat | Attack scenario | Security requirement | Design constraint |
+|---|---|---|---|---|
+| *File content* | Disclosure | The attacker obtains the package from the channel and tries to read the content. | Only authorized recipients can access the content. | The file must be encrypted before leaving the trusted environment. |
+| *File key* | Disclosure | The attacker intercepts the package and tries to obtain the key protecting the file. | Only authorized recipients can recover the key. | The file key must be individually protected per recipient. |
+| *Package metadata* | Modification / Tampering | The attacker alters metadata in transit or storage. | Any unauthorized modification must be detected. | Metadata must be authenticated together with the content. |
+| *Sender identity* | Spoofing | The attacker builds or modifies a package presenting it as coming from Alice. | The recipient must verify the real authenticity of the sender. | The package must include verifiable authenticity evidence. |
+| *Package / channel* | Replay | The attacker resends an old, previously valid copy of the package. | The system must identify or discard repeated packages. | The package must include information that distinguishes each specific send. |
+| *Private keys* | Theft or compromise | The attacker accesses local storage and tries to extract the private key. | Private keys must remain protected even if local storage is compromised. | Private keys must not be stored in plaintext. |
+| *Complete secure package* | Manipulation / corruption | The attacker corrupts the package and the recipient processes it unaware. | Manipulated packages must be rejected (fail-closed). | The system must validate integrity before exposing the content. |
+| *List of recipients* | Unauthorized access | A non-selected user attempts to recover the file. | Only designated recipients will be able to recover the file. | Recipient selection is fixed at protection time. |
+| *User credentials* | Interception / sniffing | The attacker captures plaintext traffic during login. | Credentials must be protected in transit and at rest. | Use of encrypted protocols/storage, never plaintext. |
+
 # 5. Trust Assumptions
 
 ## 5.1 Alice's zone (sender)
