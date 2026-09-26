@@ -165,5 +165,70 @@ The following security requirements the system must guarantee are listed below, 
 
 
 # 6. Attack Surface Review
+The attack surface is organized according to the system's two trust boundaries.
+6.1 Boundary 1 — Alice's environment → Untrusted channel
+Interface / component
+What could go wrong?
+Security property at risk
+Secure package generated (output)
+It is the only exposed surface when leaving the trusted environment; its cryptographic protection is the only thing preventing an observer from extracting information.
+Confidentiality, integrity
+Recipient public key import interface
+If the public key is obtained via an unverified channel, an attacker can substitute it before encryption (MITM).
+Confidentiality of content
+Password entry
+If the password unlocking Alice's keystore is captured (keylogging, unmasked field), the private key is compromised.
+Confidentiality of private keys
+CLI arguments
+Paths, passwords, or keys passed as parameters may be exposed in shell history or process logs.
+Confidentiality of credentials and keys
+
+6.2 Boundary 2 — Untrusted channel → Bob/Carol's environment
+Interface / component
+What could go wrong?
+Security property at risk
+Secure package parser
+Malformed fields, out-of-range sizes, unexpected data types, or unsupported algorithm versions.
+Availability, integrity
+Recovered file input
+Malicious filenames or path traversal when writing the decrypted file to disk.
+File system integrity
+Control metadata
+Recipient identifiers, algorithm ID, version, and timestamps modifiable prior to verification.
+Integrity, authenticity
+Key interfaces / local keystore
+Access to Bob's keystore and password/PIN request to unlock his private key.
+Confidentiality of private keys
+Transport / buffer channel
+Reading, modification, replacement, replay, or deletion of packets in transit or at rest.
+Confidentiality, integrity, availability
+Error handling and logging
+Error messages or logs that could leak internal information without a generic fail-closed scheme.
+Confidentiality of internal information
+Password entry at Bob's side
+Same as Alice: capturing the password compromises the private key.
+Confidentiality of private keys
+Signature verification
+Implementation errors could accept invalid or forged signatures.
+Authenticity
+
+6.3 Realistic attacker capabilities (summary)
+Passive observation: can read and copy all traffic/storage in the untrusted channel.
+Active modification: can alter packet bits/blocks and metadata.
+Replacement/injection: can substitute a legitimate package, inject malformed packages, or replace a public key.
+Replay: can capture a valid package and resend it later.
+Suppression/deletion: can block or delete packages, affecting availability.
+Out of scope: no physical/execution access to local devices, and no ability to break underlying cryptographic primitives.
 
 # 7. Unresolved Security Questions
+The following cryptographic design decisions are intentionally left open at this stage:
+Which AEAD algorithm will be used (AES-GCM vs. ChaCha20-Poly1305) and with what key size?
+Which hybrid encryption scheme will protect the file key per recipient (RSA-OAEP, ECIES, or other)?
+Which digital signature algorithm will be used (RSA-PSS, ECDSA, EdDSA) and exactly which fields will be signed?
+How will nonces/IVs be generated and managed, avoiding reuse?
+What serialization/canonicalization format will be used for metadata before signing?
+What KDF and parameters will protect private keys at rest (encrypted keystore)?
+What mechanism will detect/mitigate replay attacks (timestamps, nonces, counters)?
+How will the key lifecycle be managed (generation, identification, rotation, revocation)?
+What minimal error information will be exposed without leaking details useful to an attacker?
+
