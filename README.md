@@ -47,6 +47,38 @@ The system assumes that the intermediate channel/storage can be observed, copied
 - User interface / user experience design.
 
 # 2. Architecture Diagram and Trust Boundaries
+The diagram below shows the overall architecture of the system, identifying trusted components, untrusted components, trust boundaries, and the main data flows for the Alice → untrusted environment → Bob scenario.
+
+![Secure File Exchange Platform Architecture](architecture-diagram.png)
+
+**Trust boundary 1:** exit from Alice's zone.  
+**Trust boundary 2:** entry into Bob/Carol's zone.
+
+## 2.1 Component classification
+
+| Category | Elements |
+|---|---|
+| **Trusted components** | Alice's original file; Alice's private signing key; protection module (AEAD encryption + packaging + signature); file key generation; recipients' public keys (used as input); signature/integrity verification at Bob's side; Bob's private key; file key recovery; AEAD decryption and verification; recovered file; fail-closed logic. |
+| **Untrusted components / data** | The secure package once it leaves Alice's environment; the transfer channel or storage medium (network, disk, cloud, USB); the package as received by Bob (treated as untrusted input until verified). |
+| **Trust boundaries** | Boundary 1: border between Alice's trusted zone and the untrusted environment. Boundary 2: border between the untrusted environment and Bob/Carol's trusted zone. |
+| **External actors** | Alice (sender); Bob and Carol (authorized recipients); active/passive attacker able to observe, copy, modify, replace, replay, or corrupt the package. |
+
+## 2.2 Where each cryptographic operation happens
+
+- **Encryption:** inside the protection module, within Alice's trusted zone, before Boundary 1.
+- **Signing:** also inside Alice's protection module, using her private key, before leaving her zone.
+- **Signature/integrity verification:** in Bob's zone, immediately upon receiving the package (fail-closed if it fails).
+- **Key storage:** private keys remain in local keystores; they never cross trust boundaries in plaintext.
+
+## 2.3 Main data flows
+
+1. File + Alice's private key → protection module.
+2. Protection module → secure package generated (encrypted + signed).
+3. The package crosses Boundary 1 toward the untrusted channel/storage.
+4. The package crosses Boundary 2 and reaches Bob/Carol's environment.
+5. Signature/integrity verification and file key recovery.
+6. AEAD decryption and verification.
+7. Recovery of the original file, or a secure rejection (fail-closed) if any verification fails.
 
 # 3. Security Requirements
 The following security requirements the system must guarantee are listed below, written as verifiable properties:
