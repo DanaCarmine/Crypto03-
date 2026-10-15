@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Pytest
+.pytest_cache/
+
+# Encryption keys
+*.key
+
+# Encrypted files
+*.vault
+
+# Environment variables
+.env
