@@ -245,7 +245,7 @@ The following cryptographic design decisions are intentionally left open at this
 * How will the key lifecycle be managed (generation, identification, rotation, revocation)?
 * What minimal error information will be exposed without leaking details useful to an attacker?
 
-## D2 - Cryptographic Implementation
+### D2 - Cryptographic Implementation
 
 ### Overview
 
@@ -260,9 +260,9 @@ modifications can be detected during decryption.
 The implementation was developed in Python using the cryptography
 library and validated through automated tests using pytest.
 
-### 1. Encryption Design
+# 1. Encryption Design
 
-#### 1.1 Selected AEAD Algorithm
+### 1.1 Selected AEAD Algorithm
 
 The selected algorithm is AES-256-GCM (Advanced Encryption Standard
 in Galois/Counter Mode), an Authenticated Encryption with Associated
@@ -279,7 +279,7 @@ AES-256-GCM provides:
 The implementation uses the AESGCM class provided by Python's
 cryptography library.
 
-#### 1.2 Key Size and Generation
+### 1.2 Key Size and Generation
 
 The system uses 256-bit (32-byte) symmetric encryption keys.
 
@@ -299,7 +299,7 @@ in local .key files.
 These files are excluded from Git version control and must not
 be published or shared with unauthorized users.
 
-#### 1.3 Nonce Strategy
+### 1.3 Nonce Strategy
 
 Each encryption operation generates a random 96-bit (12-byte)
 nonce using:
@@ -317,7 +317,7 @@ the same encryption key.
 To reduce the risk of nonce reuse, the application generates
 a new encryption key and a random nonce for every operation.
 
-#### 1.4 Metadata Authentication Strategy
+### 1.4 Metadata Authentication Strategy
 
 The application uses Additional Authenticated Data (AAD)
 to protect the integrity of file metadata.
@@ -342,7 +342,7 @@ and must match during decryption.
 Although the metadata remains readable, any unauthorized
 modification causes authentication to fail.
 
-#### 1.5 Encrypted File Format
+### 1.5 Encrypted File Format
 
 The encrypted document is stored in a JSON-based container
 with the .vault extension.
@@ -370,9 +370,9 @@ json
 
 The encryption key is not included in the .vault container.
 
-### 2. Security Decisions
+# 2. Security Decisions
 
-#### 2.1 Why AEAD Instead of Encryption + Hash?
+### 2.1 Why AEAD Instead of Encryption + Hash?
 
 AEAD was selected because it combines encryption and
 authentication within a single cryptographic construction.
@@ -392,7 +392,7 @@ Message Authentication Code (MAC) can also provide secure
 authenticated encryption, AEAD simplifies implementation
 and reduces the risk of cryptographic design errors.
 
-#### 2.2 What Happens if a Nonce Repeats?
+### 2.2 What Happens if a Nonce Repeats?
 
 Reusing the same nonce with the same AES-GCM encryption key
 can seriously compromise security.
@@ -409,7 +409,7 @@ To reduce this risk, the application generates a new
 256-bit encryption key and a random 96-bit nonce for
 every encryption operation.
 
-#### 2.3 What Attacker Are We Defending Against?
+### 2.3 What Attacker Are We Defending Against?
 
 The system is designed to defend against an attacker who
 can access, copy, intercept, or modify encrypted files,
@@ -435,7 +435,7 @@ The system also does not prevent deletion of encrypted files
 or replacement of a complete valid encrypted container
 with another valid container and its corresponding key.
 
-### 3. Implementation
+# 3. Implementation
 
 The cryptographic implementation is organized into separate
 Python modules.
@@ -456,7 +456,7 @@ authentication tag before writing the recovered plaintext.
 If authentication fails, the operation is rejected and
 no decrypted output file is generated.
 
-### 4. Automated Tests
+# 4. Automated Tests
 
 The implementation includes five automated tests developed
 using pytest.
@@ -483,7 +483,7 @@ text
 ================ 5 passed ================
 
 
-### 5. Security Limitations
+# 5. Security Limitations
 
 The current implementation is an educational prototype.
 
@@ -500,7 +500,7 @@ Its main limitations include:
 A production version should incorporate secure key storage,
 access control, and additional security mechanisms.
 
-### 6. Development and Collaboration
+# 6. Development and Collaboration
 
 The D2 implementation was developed collaboratively using
 Git and GitHub.
