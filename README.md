@@ -245,3 +245,274 @@ The following cryptographic design decisions are intentionally left open at this
 * How will the key lifecycle be managed (generation, identification, rotation, revocation)?
 * What minimal error information will be exposed without leaking details useful to an attacker?
 
+## D2 - Cryptographic Implementation
+
+### Overview
+
+During the D2 development phase, the Secure Digital Document Vault
+project implements authenticated encryption and decryption of digital
+documents using AES-256-GCM.
+
+The objective of this phase is to protect the confidentiality and
+integrity of digital files while ensuring that unauthorized
+modifications can be detected during decryption.
+
+The implementation was developed in Python using the cryptography
+library and validated through automated tests using pytest.
+
+### 1. Encryption Design
+
+#### 1.1 Selected AEAD Algorithm
+
+The selected algorithm is AES-256-GCM (Advanced Encryption Standard
+in Galois/Counter Mode), an Authenticated Encryption with Associated
+Data (AEAD) algorithm.
+
+AES-256-GCM provides:
+
+- *Confidentiality:* Protects the content of digital documents
+  through symmetric encryption.
+- *Integrity:* Detects unauthorized modifications to encrypted data.
+- *Authentication:* Verifies that encrypted data and associated
+  metadata have not been modified without authorization.
+
+The implementation uses the AESGCM class provided by Python's
+cryptography library.
+
+#### 1.2 Key Size and Generation
+
+The system uses 256-bit (32-byte) symmetric encryption keys.
+
+A new random encryption key is generated for each encryption
+operation using:
+
+python
+key = AESGCM.generate_key(bit_length=256)
+
+
+This approach avoids using a fixed encryption key for all
+documents.
+
+For the current prototype, encryption keys are stored separately
+in local .key files.
+
+These files are excluded from Git version control and must not
+be published or shared with unauthorized users.
+
+#### 1.3 Nonce Strategy
+
+Each encryption operation generates a random 96-bit (12-byte)
+nonce using:
+
+python
+nonce = os.urandom(12)
+
+
+The nonce is stored in the encrypted container because it is
+required during decryption and does not need to remain secret.
+
+AES-GCM requires that the same nonce must not be reused with
+the same encryption key.
+
+To reduce the risk of nonce reuse, the application generates
+a new encryption key and a random nonce for every operation.
+
+#### 1.4 Metadata Authentication Strategy
+
+The application uses Additional Authenticated Data (AAD)
+to protect the integrity of file metadata.
+
+The authenticated metadata includes:
+
+- filename: Original filename.
+- algorithm: Encryption algorithm used.
+- version: Version of the encrypted container format.
+- created_at: Date and time of encryption.
+
+Before encryption, the metadata is serialized into JSON
+using sorted keys:
+
+python
+aad = json.dumps(metadata, sort_keys=True).encode("utf-8")
+
+
+The resulting AAD is supplied to AES-GCM during encryption
+and must match during decryption.
+
+Although the metadata remains readable, any unauthorized
+modification causes authentication to fail.
+
+#### 1.5 Encrypted File Format
+
+The encrypted document is stored in a JSON-based container
+with the .vault extension.
+
+The container includes:
+
+- Authenticated file metadata.
+- The encryption nonce.
+- The ciphertext, including the AES-GCM authentication tag.
+
+Example structure:
+
+json
+{
+    "metadata": {
+        "filename": "documento.txt",
+        "algorithm": "AES-256-GCM",
+        "version": 1,
+        "created_at": "2026-10-16T12:00:00+00:00"
+    },
+    "nonce": "<hex-encoded nonce>",
+    "ciphertext": "<hex-encoded ciphertext and authentication tag>"
+}
+
+
+The encryption key is not included in the .vault container.
+
+### 2. Security Decisions
+
+#### 2.1 Why AEAD Instead of Encryption + Hash?
+
+AEAD was selected because it combines encryption and
+authentication within a single cryptographic construction.
+
+Using encryption with a conventional hash does not provide
+equivalent protection, since an attacker who modifies the
+ciphertext could also calculate a new hash.
+
+AES-256-GCM generates an authentication tag that depends on
+the encryption key, nonce, ciphertext, and associated data.
+
+This allows the application to detect unauthorized modifications
+without requiring a separate authentication mechanism.
+
+Although encryption combined with a properly implemented
+Message Authentication Code (MAC) can also provide secure
+authenticated encryption, AEAD simplifies implementation
+and reduces the risk of cryptographic design errors.
+
+#### 2.2 What Happens if a Nonce Repeats?
+
+Reusing the same nonce with the same AES-GCM encryption key
+can seriously compromise security.
+
+Nonce reuse can:
+
+- Reveal relationships between encrypted plaintexts.
+- Compromise confidentiality.
+- Facilitate authentication forgery attacks.
+- Allow attackers to exploit weaknesses caused by repeated
+  encryption parameters.
+
+To reduce this risk, the application generates a new
+256-bit encryption key and a random 96-bit nonce for
+every encryption operation.
+
+#### 2.3 What Attacker Are We Defending Against?
+
+The system is designed to defend against an attacker who
+can access, copy, intercept, or modify encrypted files,
+but does not possess the corresponding secret encryption key.
+
+The attacker may attempt to:
+
+- Read confidential information from encrypted documents.
+- Modify encrypted content.
+- Alter authenticated metadata.
+- Replace encrypted data with manipulated information.
+- Decrypt documents using an incorrect key.
+
+AES-256-GCM protects the confidentiality of encrypted
+documents and detects unauthorized modifications during
+authenticated decryption.
+
+However, the current prototype does not protect against
+attackers who obtain the secret encryption key or compromise
+the computer where plaintext files and keys are stored.
+
+The system also does not prevent deletion of encrypted files
+or replacement of a complete valid encrypted container
+with another valid container and its corresponding key.
+
+### 3. Implementation
+
+The cryptographic implementation is organized into separate
+Python modules.
+
+| File | Description |
+|------|-------------|
+| D2/src/encryption.py | Implements AES-256-GCM encryption, key generation, nonce generation, and metadata authentication. |
+| D2/src/decryption.py | Implements authenticated decryption and authentication failure handling. |
+| D2/main.py | Demonstrates the encryption and decryption workflow. |
+| D2/requirements.txt | Defines the required Python dependencies. |
+
+During encryption, the application generates a new key and
+nonce, encrypts the document, and creates a .vault container.
+
+During decryption, the application verifies the AES-GCM
+authentication tag before writing the recovered plaintext.
+
+If authentication fails, the operation is rejected and
+no decrypted output file is generated.
+
+### 4. Automated Tests
+
+The implementation includes five automated tests developed
+using pytest.
+
+| Test | Objective | Expected Result |
+|------|-----------|-----------------|
+| Successful encryption and decryption | Verify that the original file can be recovered. | Recovered content matches the original. |
+| Incorrect encryption key | Verify rejection of invalid keys. | Authentication fails. |
+| Modified ciphertext | Verify detection of altered encrypted content. | Decryption is rejected. |
+| Modified metadata | Verify integrity protection through AAD. | Authentication fails. |
+| Multiple encryptions | Verify that repeated encryption produces different outputs. | Different ciphertexts, nonces, and keys. |
+
+All five tests passed successfully during development.
+
+To execute the tests, navigate to the D2 directory and run:
+
+bash
+python -m pytest -v -s
+
+
+Expected result:
+
+text
+================ 5 passed ================
+
+
+### 5. Security Limitations
+
+The current implementation is an educational prototype.
+
+Its main limitations include:
+
+- Encryption keys are stored in local unencrypted .key files.
+- No centralized key management system is implemented.
+- User authentication and authorization are not implemented.
+- Plaintext files are not securely erased after encryption.
+- The system does not implement secure key backup or recovery.
+- The implementation has not undergone an independent
+  security audit.
+
+A production version should incorporate secure key storage,
+access control, and additional security mechanisms.
+
+### 6. Development and Collaboration
+
+The D2 implementation was developed collaboratively using
+Git and GitHub.
+
+The team organized its work into separate development branches
+and integrated contributions through Pull Requests.
+
+| Team Member | Contribution |
+|-------------|--------------|
+| Daniela | AES-256-GCM encryption module. |
+| Ana Paula | Authenticated decryption module. |
+| Sarah | Basic encryption and decryption tests. |
+| Dana | Ciphertext and metadata integrity tests. |
+| Bruno | Multiple encryption test. |
+
