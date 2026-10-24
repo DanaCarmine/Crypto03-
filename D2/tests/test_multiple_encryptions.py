@@ -1,46 +1,56 @@
-import json
-
 from src.encryption import encrypt_file
+from src.key_management import generate_key_pair
+from src.container import load_container
 
 
 def test_multiple_encryptions(tmp_path):
-    original = tmp_path / "original.txt"
-    original.write_text("Same document content", encoding="utf-8")
+    """
+    Verify that encrypting the same document twice
+    produces different ciphertexts and nonces.
+    """
 
+    # 1. Create the original document
+    original = tmp_path / "original.txt"
+    original.write_text(
+        "Same document content",
+        encoding="utf-8"
+    )
+
+    # 2. Define output files
     encrypted1 = tmp_path / "encrypted1.vault"
     encrypted2 = tmp_path / "encrypted2.vault"
 
-    key1 = tmp_path / "secret1.key"
-    key2 = tmp_path / "secret2.key"
+    # 3. Generate key pairs for two recipients
+    alice_private, alice_public = generate_key_pair()
+    bob_private, bob_public = generate_key_pair()
 
-    # Encrypt the same file twice
-    encrypt_file(original, encrypted1, key1)
-    encrypt_file(original, encrypted2, key2)
-
-    # Read both encrypted containers
-    with open(encrypted1, "r", encoding="utf-8") as file:
-        container1 = json.load(file)
-
-    with open(encrypted2, "r", encoding="utf-8") as file:
-        container2 = json.load(file)
-
-    # Compare the encryption results
-    different_ciphertexts = (
-        container1["ciphertext"] != container2["ciphertext"]
+    # 4. Encrypt the same document twice
+    encrypt_file(
+        original,
+        encrypted1,
+        [alice_public, bob_public]
     )
 
-    different_nonces = (
-        container1["nonce"] != container2["nonce"]
+    encrypt_file(
+        original,
+        encrypted2,
+        [alice_public, bob_public]
     )
 
-    different_keys = (
-        key1.read_bytes() != key2.read_bytes()
-    )
+    # 5. Load both encrypted containers
+    container1 = load_container(encrypted1)
+    container2 = load_container(encrypted2)
 
-    print("Different ciphertexts:", different_ciphertexts)
-    print("Different nonces:", different_nonces)
-    print("Different keys:", different_keys)
+    # 6. Verify that both files were created
+    assert encrypted1.exists()
+    assert encrypted2.exists()
 
-    assert different_ciphertexts
-    assert different_nonces
-    assert different_keys
+    # 7. Verify that the nonces are different
+    assert container1["nonce"] != container2["nonce"]
+
+    # 8. Verify that the ciphertexts are different
+    assert container1["ciphertext"] != container2["ciphertext"]
+
+    # 9. Verify that both containers have two recipients
+    assert len(container1["recipients"]) == 2
+    assert len(container2["recipients"]) == 2

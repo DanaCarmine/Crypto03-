@@ -1,58 +1,112 @@
 import os
-import json
 
 from pathlib import Path
 from datetime import datetime, timezone
+
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from src.key_management import (
+    get_key_fingerprint,
+    encrypt_file_key
+)
 
-def encrypt_file(file_path, output_path, key_path):
+from src.container import (
+    build_aad,
+    create_container,
+    save_container
+)
 
-    # 1. Leer el archivo original
+
+def encrypt_file(file_path, output_path, recipient_public_keys):
+    """
+    Encrypt a file using AES-256-GCM and protect the AES key
+    for multiple recipients using ECIES.
+
+    Args:
+        file_path (str): Path to the original file.
+        output_path (str): Path to the encrypted .vault file.
+        recipient_public_keys (list): List of recipient public keys.
+
+    Returns:
+        None
+    """
+
+    # 1. Validate the recipient list
+    if not isinstance(recipient_public_keys, list):
+        raise ValueError("Recipient public keys must be provided as a list.")
+
+    if len(recipient_public_keys) < 2:
+        raise ValueError("At least two recipients are required.")
+
+    # 2. Read the original file
     file_path = Path(file_path)
 
-    with open(file_path, "rb") as file:
+    with file_path.open("rb") as file:
         plaintext = file.read()
 
-    # 2. Generar una nueva clave AES de 256 bits
+    # 3. Generate a random 256-bit AES key
     key = AESGCM.generate_key(bit_length=256)
 
-    # 3. Generar un nonce aleatorio de 96 bits
+    # 4. Generate a random 96-bit nonce
     nonce = os.urandom(12)
 
-    # 4. Definir los metadatos del archivo
+    # 5. Create file metadata
     metadata = {
         "filename": file_path.name,
         "algorithm": "AES-256-GCM",
-        "version": 1,
+        "key_encryption": "ECIES-secp256k1",
+        "version": "3.0",
         "created_at": datetime.now(timezone.utc).isoformat()
     }
 
-    # 5. Convertir los metadatos a bytes para usarlos como AAD
-    aad = json.dumps(
-        metadata,
-        sort_keys=True
-    ).encode("utf-8")
+    # 6. Encrypt the AES key for each recipient using ECIES
+    recipients = []
+    recipient_ids = set()
 
-    # 6. Crear el objeto AES-GCM
+    for public_key in recipient_public_keys:
+
+        # Generate the recipient's SHA-256 fingerprint
+        recipient_id = get_key_fingerprint(public_key)
+
+        # Prevent duplicate recipients
+        if recipient_id in recipient_ids:
+            raise ValueError("Duplicate recipients are not allowed.")
+
+        recipient_ids.add(recipient_id)
+
+        # Encrypt the AES key using the recipient's public key
+        encrypted_key = encrypt_file_key(public_key, key)
+
+        # Store the recipient information
+        recipients.append({
+            "id": recipient_id,
+            "encrypted_key": encrypted_key.hex()
+        })
+
+    # 7. Generate AAD using metadata and the complete recipient list
+    aad = build_aad(metadata, recipients)
+
+    # 8. Create the AES-GCM object
     aesgcm = AESGCM(key)
 
-    # 7. Cifrar el contenido del archivo
-    ciphertext = aesgcm.encrypt(nonce, plaintext, aad)
+    # 9. Encrypt the document
+    ciphertext = aesgcm.encrypt(
+        nonce,
+        plaintext,
+        aad
+    )
 
-    # 8. Crear el contenedor cifrado
-    container = {
-        "metadata": metadata,
-        "nonce": nonce.hex(),
-        "ciphertext": ciphertext.hex()
-    }
+    # 10. Create the encrypted vault container
+    container = create_container(
+        metadata,
+        recipients,
+        nonce,
+        ciphertext
+    )
 
-    # 9. Guardar el contenedor cifrado
-    with open(output_path, "x", encoding="utf-8") as file:
-        json.dump(container, file, indent=4)
-
-    # 10. Guardar la clave en un archivo independiente
-    with open(key_path, "xb") as file:
-        file.write(key)
+    # 11. Save the encrypted container
+    save_container(container, output_path)
 
     print("File encrypted successfully!")
+    print(f"Recipients: {len(recipients)}")
+    print(f"Encrypted file: {output_path}")
