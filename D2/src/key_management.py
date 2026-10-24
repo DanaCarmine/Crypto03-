@@ -32,33 +32,32 @@ def get_key_fingerprint(public_key):
 def encrypt_file_key(public_key, file_key):
     """
     Encrypt an AES file key using the recipient's ECIES public key.
-
-    Args:
-        public_key (bytes): Recipient's compressed public key.
-        file_key (bytes): 256-bit AES key to encrypt.
-
-    Returns:
-        bytes: Encrypted AES key.
     """
-    if len(file_key) != 32:
+
+    if not isinstance(public_key, bytes) or len(public_key) != 33:
+        raise ValueError("Invalid public key format.")
+
+    if public_key[0] not in (2, 3):
+        raise ValueError("Invalid compressed public key prefix.")
+
+    if not isinstance(file_key, bytes) or len(file_key) != 32:
         raise ValueError("The AES file key must be 32 bytes.")
 
     encrypted_key = encrypt(public_key, file_key)
 
     return encrypted_key
 
-
 def decrypt_file_key(private_key, encrypted_key):
     """
     Recover an AES file key using the recipient's ECIES private key.
-
-    Args:
-        private_key (bytes): Recipient's private key.
-        encrypted_key (bytes): ECIES-encrypted AES key.
-
-    Returns:
-        bytes: Recovered AES key.
     """
+
+    if not isinstance(private_key, bytes) or len(private_key) != 32:
+        raise ValueError("Invalid private key format.")
+
+    if not isinstance(encrypted_key, bytes) or not encrypted_key:
+        raise ValueError("Invalid encrypted key format.")
+
     file_key = decrypt(private_key, encrypted_key)
 
     if len(file_key) != 32:
