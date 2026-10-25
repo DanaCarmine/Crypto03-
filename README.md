@@ -552,7 +552,7 @@ If an unauthorized recipient's key is used, their private key will fail to recov
 
 # 3. GitHub Requirements & Deliverables
 
-Our repository fulfills all project requirements for Deliverable D2:
+Our repository fulfills all project requirements for Deliverable D3:
 
 Inclusion of New Functionalities: Implementation of multi-recipient ECIES key management (src/key_management.py), canonical container handling with AAD integrity (src/container.py), AES-GCM file encryption (src/encryption.py), and multi-recipient file decryption (src/decryption.py).
 
