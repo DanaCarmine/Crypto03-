@@ -554,10 +554,10 @@ If an unauthorized recipient's key is used, their private key will fail to recov
 
 Our repository fulfills all project requirements for Deliverable D2:
 
-## Inclusion of New Functionalities: Implementation of multi-recipient ECIES key management (src/key_management.py), canonical container handling with AAD integrity (src/container.py), AES-GCM file encryption (src/encryption.py), and multi-recipient file decryption (src/decryption.py).
+Inclusion of New Functionalities: Implementation of multi-recipient ECIES key management (src/key_management.py), canonical container handling with AAD integrity (src/container.py), AES-GCM file encryption (src/encryption.py), and multi-recipient file decryption (src/decryption.py).
 
-## Pull Request & Code Review: Changes introduced via Pull Request workflow on GitHub, including peer code reviews and discussion threads prior to merging into main.
+Pull Request & Code Review: Changes introduced via Pull Request workflow on GitHub, including peer code reviews and discussion threads prior to merging into main.
 
-## Unit Tests & Continuous Integration: Comprehensive test suite with 100% test coverage across 7 test files (test_basic.py, test_container.py, test_decryption.py, test_encryption.py, test_key_management.py, test_multiple_encryptions.py, test_security.py). Automated test execution is configured using GitHub Actions (.github/workflows/python-tests.yml).
+Unit Tests & Continuous Integration: Comprehensive test suite with 100% test coverage across 7 test files (test_basic.py, test_container.py, test_decryption.py, test_encryption.py, test_key_management.py, test_multiple_encryptions.py, test_security.py). Automated test execution is configured using GitHub Actions (.github/workflows/python-tests.yml).
 
-## Updated README: Complete documentation outlining project structure, architecture decisions, threat model defenses, and usage instructions.
+Updated README: Complete documentation outlining project structure, architecture decisions, threat model defenses, and usage instructions.
