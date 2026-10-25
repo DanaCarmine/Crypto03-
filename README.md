@@ -516,3 +516,48 @@ and integrated contributions through Pull Requests.
 | Dana | Ciphertext and metadata integrity tests. |
 | Bruno | Multiple encryption test. |
 
+D3 Hybrid Encryption 
+
+1. Hybrid Design Explanation
+
+Why hybrid encryption is used
+
+Public key cryptography (such as ECIES-secp256k1) is computationally intensive and not designed for encrypting large payloads directly. Conversely, symmetric encryption algorithms like AES-256-GCM are extremely fast and efficient at processing arbitrarily large files. Hybrid encryption combines the strengths of both paradigms: symmetric encryption encrypts the actual document payload using a randomly generated AES key, while asymmetric encryption securely transmits and shares this AES key with target recipients.
+
+Why symmetric encryption is still needed
+
+Symmetric encryption provides high-throughput data processing and authenticated confidentiality (AEAD) for the document content itself. Without symmetric encryption, encrypting large documents with public-key algorithms would result in unacceptable performance overhead, strict size limitations, and severe computational inefficiency.
+
+Why per-recipient key encryption is required
+
+Per-recipient key encryption enables secure multi-recipient document sharing without needing to duplicate or separately encrypt the main document payload for each user. A single file encryption key (FEK/AES key) encrypts the document payload once. That FEK is then encrypted separately using each authorized recipient's public key (ECIES), allowing each authorized user to unwrap the same underlying AES key using their private key.
+
+2. Security Decisions
+
+How do recipients identify their key?
+
+Each recipient entry inside the vault container contains a unique identifier (id). This id is computed as the deterministic SHA-256 fingerprint of the recipient's compressed public key (get_key_fingerprint). Upon opening a container, a recipient computes the SHA-256 fingerprint of their public key and searches the recipients list for a matching id to locate their encrypted AES key.
+
+What happens if an attacker modifies the recipient list?
+
+The entire list of recipients (including IDs and encrypted keys) is serialized deterministically into the Authenticated Additional Data (AAD) bound to the AES-GCM ciphertext. If an attacker tampers with, adds, or removes any recipient or encrypted key entry, the reconstructed AAD during decryption will not match the tag computed at encryption time. Consequently, AES-GCM authentication fails immediately with an InvalidTag exception, preventing tampered containers from being decrypted.
+
+What happens if the public key is wrong?
+
+If an invalid or corrupted public key is provided during encryption:
+
+Format validation checks fail (e.g., verifying 33-byte length and valid compressed SECP256k1 prefix 0x02 or 0x03).
+
+If an unauthorized recipient's key is used, their private key will fail to recover the correct AES key during ECIES decryption, raising an exception during key unwrapping or triggering an authentication failure (InvalidTag) when attempting to decrypt the file payload.
+
+3. GitHub Requirements & Deliverables
+
+Our repository fulfills all project requirements for Deliverable D2:
+
+Inclusion of New Functionalities: Implementation of multi-recipient ECIES key management (src/key_management.py), canonical container handling with AAD integrity (src/container.py), AES-GCM file encryption (src/encryption.py), and multi-recipient file decryption (src/decryption.py).
+
+Pull Request & Code Review: Changes introduced via Pull Request workflow on GitHub, including peer code reviews and discussion threads prior to merging into main.
+
+Unit Tests & Continuous Integration: Comprehensive test suite with 100% test coverage across 7 test files (test_basic.py, test_container.py, test_decryption.py, test_encryption.py, test_key_management.py, test_multiple_encryptions.py, test_security.py). Automated test execution is configured using GitHub Actions (.github/workflows/python-tests.yml).
+
+Updated README: Complete documentation outlining project structure, architecture decisions, threat model defenses, and usage instructions.
