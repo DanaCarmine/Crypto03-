@@ -10,7 +10,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
-    # Establece la carpeta D2 como directorio de trabajo predeterminado
     defaults:
       run:
         working-directory: ./D2
@@ -31,5 +30,7 @@ jobs:
         pip install pytest
 
     - name: Ejecutar pruebas con Pytest
+      env:
+        PYTHONPATH: .
       run: |
-        pytest
+        python -m pytest
