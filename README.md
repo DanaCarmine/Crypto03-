@@ -561,3 +561,231 @@ Pull Request & Code Review: Changes introduced via Pull Request workflow on GitH
 Unit Tests & Continuous Integration: Comprehensive test suite with 100% test coverage across 7 test files (test_basic.py, test_container.py, test_decryption.py, test_encryption.py, test_key_management.py, test_multiple_encryptions.py, test_security.py). Automated test execution is configured using GitHub Actions (.github/workflows/python-tests.yml).
 
 Updated README: Complete documentation outlining project structure, architecture decisions, threat model defenses, and usage instructions.
+---
+
+# D3 – Final Integration, Implementation, and Security Validation
+
+> **Documentation note:** This section describes the integrated D3 checkpoint. Earlier D1 and D2 sections are preserved as evidence of the project's development and may describe earlier implementations.
+
+## 1. Integration Overview
+
+Secure Digital Document Vault combines **AES-256-GCM** for document encryption with **ECIES (secp256k1)** for protecting the file key for multiple recipients. A document is encrypted **once**, while its randomly generated AES key is encrypted separately for each authorized recipient.
+
+The integrated Python implementation supports encrypted `.vault` containers, recipient identification, authenticated metadata, authorized decryption, rejection of unauthorized users, and detection of ciphertext tampering.
+
+## 2. Project Modules
+
+The main implementation is located in `D2/src/`:
+
+| Module | Responsibility |
+| --- | --- |
+| `encryption.py` | Generates a fresh AES-256 key and 96-bit nonce, encrypts the file using AES-GCM, wraps the file key for each recipient, and creates the encrypted container. |
+| `key_management.py` | Generates secp256k1 key pairs, calculates SHA-256 public-key fingerprints, and encrypts/decrypts file keys with ECIES. |
+| `container.py` | Serializes, reads, and validates the JSON-based `.vault` container and constructs the authenticated metadata representation. |
+| `decryption.py` | Validates the container, identifies the authorized recipient, unwraps the AES key, authenticates and decrypts the document, and checks output handling. |
+
+### Key Formats
+
+- AES file key: **256 bits (32 bytes)**, generated anew for each encrypted file.
+- AES-GCM nonce: **96 bits (12 bytes)**, generated randomly for each encryption.
+- ECIES private key: **32 bytes**.
+- Compressed secp256k1 public key: **33 bytes**.
+- Recipient identifier: **SHA-256 fingerprint**, represented as **64 hexadecimal characters**.
+
+Each recipient has their own public/private key pair. Private keys are **not stored** in the `.vault` container.
+
+## 3. Encryption Workflow
+
+1. The sender selects a local document and at least two distinct authorized recipients.
+2. The application generates a fresh random 256-bit AES file key and a 96-bit nonce.
+3. It prepares the document metadata and full recipient list as **Additional Authenticated Data (AAD)**.
+4. It encrypts the document **once** with **AES-256-GCM**.
+5. It encrypts the same AES file key separately using each recipient's ECIES public key.
+6. It stores metadata, recipient identifiers and wrapped keys, nonce, and ciphertext in a `.vault` file.
+
+```text
+Original document
+       |
+       v
+Fresh AES-256 key + 96-bit nonce
+       |
+       v
+AES-256-GCM encryption <--- authenticated metadata + recipient list (AAD)
+       |
+       +-------------------+
+       |                   |
+       v                   v
+ECIES for Alice       ECIES for Bob
+(public key)          (public key)
+       |                   |
+       +---------+---------+
+                 |
+                 v
+        Encrypted .vault file
+```
+
+**Why hybrid encryption?** AES efficiently encrypts the document, while ECIES allows each recipient to recover the same AES key with their own private key. The document does not need to be encrypted again for every recipient.
+
+## 4. Decryption Workflow
+
+1. The recipient opens the `.vault` file, and the application validates its structure.
+2. The application identifies the recipient using the fingerprint associated with their private key.
+3. It locates the corresponding encrypted AES file key in the recipient list.
+4. ECIES recovers the AES key using the recipient's private key.
+5. The application reconstructs the AAD and attempts AES-GCM authenticated decryption.
+6. If authentication succeeds, the original file is written to the output location. Otherwise, the operation is rejected.
+
+An unauthorized recipient cannot select a matching wrapped key. Changes to authenticated ciphertext, metadata, or recipient information cause AES-GCM authentication to fail.
+
+## 5. Encrypted `.vault` Container
+
+The `.vault` file is a JSON-based container. The following is an **illustrative example**, not a literal generated file:
+
+```json
+{
+  "metadata": {
+    "filename": "confidential_document.txt",
+    "algorithm": "AES-256-GCM",
+    "key_encryption": "ECIES-secp256k1",
+    "version": "1.0",
+    "created_at": "example_timestamp"
+  },
+  "recipients": [
+    {
+      "id": "alice_public_key_fingerprint",
+      "encrypted_key": "encrypted_AES_key_for_Alice"
+    },
+    {
+      "id": "bob_public_key_fingerprint",
+      "encrypted_key": "encrypted_AES_key_for_Bob"
+    }
+  ],
+  "nonce": "encoded_nonce",
+  "ciphertext": "encoded_ciphertext"
+}
+```
+
+| Field | Purpose |
+| --- | --- |
+| `metadata` | Document name, algorithms, version, and creation information. |
+| `recipients` | Authorized public-key fingerprints and an ECIES-encrypted AES key for each recipient. |
+| `nonce` | Non-secret nonce required for AES-GCM decryption. |
+| `ciphertext` | Encrypted document data with AES-GCM authentication information. |
+
+The container does **not** include plaintext document content, plaintext AES file keys, or recipients' private keys.
+
+## 6. Security Decisions
+
+- **AES-256-GCM (AEAD):** Protects confidentiality and detects modifications to authenticated data.
+- **ECIES with secp256k1:** Protects the file key independently for each recipient.
+- **SHA-256 fingerprints:** Identify recipient public keys; fingerprints are identifiers, not secrets.
+- **AAD:** Authenticates metadata and the complete recipient list without encrypting those fields.
+- **Fresh key and nonce:** Each encrypted file receives a new AES key and random nonce; a nonce must never be reused with the same AES key.
+- **Private-key separation:** Private keys remain outside the shared `.vault` file.
+
+**Security scope:** AES-GCM authentication is not a digital signature and does not establish the sender's identity. Digital signature generation and verification are **not implemented** in the current D3 modules.
+
+## 7. Automated Testing with PyTest
+
+The team validated the integrated project with **42 passing automated tests locally**. The suite covers encryption/decryption, key management, fingerprints, multi-recipient behavior, invalid inputs, container validation, and tampering detection.
+
+From the `D2` directory, run:
+
+```bash
+python -m pytest tests/ -v
+```
+
+The reported **42 passing tests** are a local result; a separate GitHub Actions run must be checked independently. Passing tests demonstrate expected behavior in tested cases, not the absence of all vulnerabilities.
+
+## 8. GitHub Actions
+
+The repository includes a **GitHub Actions workflow configured for automated testing**. Its purpose is to run the project's tests during the development and integration process.
+
+```text
+Code changes → GitHub Actions → PyTest → Test results
+```
+
+To inspect actual workflow runs, open the repository's **Actions** tab and review the relevant run and logs. Do not assume that the latest CI run passed solely because local tests passed.
+
+## 9. D3 Demonstration
+
+The script `D2/demo_d3.py` runs four scenarios using the integrated modules. It generates key pairs for **Alice** and **Bob** (authorized recipients) and **Charlie** (unauthorized).
+
+| Scenario | Operation | Expected result |
+| --- | --- | --- |
+| 1. Encryption and decryption | Encrypt a sample document and decrypt it as Alice. | Recovered bytes match the original. |
+| 2. Authorized sharing | Bob decrypts the **same** `.vault` file with his own private key. | Successful recovery. |
+| 3. Unauthorized access | Charlie attempts to decrypt the file. | Rejected; no Charlie output file. |
+| 4. Tampering detection | Modify a copy of the ciphertext and try to decrypt it. | Authentication fails; no recovered output. |
+
+Run from `D2/`:
+
+```bash
+python demo_d3.py
+```
+
+Press **Enter** to advance between scenarios. When the checks pass, the final summary is:
+
+```text
+[PASS] Encryption and decryption
+[PASS] Authorized sharing
+[PASS] Unauthorized access rejected
+[PASS] Modified document rejected
+
+ALL 4 SECURITY SCENARIOS PASSED
+```
+
+Error messages during scenarios 3 and 4 are **expected rejection outcomes**, not unexpected failures.
+
+### Generated Demonstration Files
+
+The script saves its outputs in `D2/demo_files/`:
+
+```text
+D2/
+├── src/
+├── tests/
+├── demo_d3.py
+└── demo_files/
+    ├── confidential_document.txt
+    ├── confidential_document.vault
+    ├── alice_decrypted.txt
+    ├── bob_decrypted.txt
+    └── modified_document.vault
+```
+
+The script removes known outputs from previous demonstrations before creating new ones. Files are kept after execution for inspection. `charlie_decrypted.txt` and `tampered_decrypted.txt` should **not** be created.
+
+To exclude generated files from Git, add this line to the **repository root** `.gitignore`:
+
+```gitignore
+D2/demo_files/
+```
+
+The demonstration uses fictional data and generates fresh recipient keys each time; it does not implement persistent key storage.
+
+## 10. Current Limitations
+
+- **Digital signatures:** Proposed in D1, but not yet implemented in the current D3 code.
+- **Persistent private-key management:** Secure storage, backup, and recovery are outside the current demonstration.
+- **Graphical interface:** The current implementation uses Python modules and a command-line demonstration.
+- **File transport:** `.vault` files can be transferred externally, but no dedicated cloud or network-sharing service is implemented.
+- **Replay and deletion:** AES-GCM detects authenticated modifications but does not, by itself, prevent replay of an older valid container or deletion of files.
+
+## 11. Team Contributions
+
+| Team member | Main contribution |
+| --- | --- |
+| Daniela | AES-256-GCM encryption and multi-recipient integration (`encryption.py`). |
+| Dana | ECIES key management and SHA-256 fingerprints (`key_management.py`). |
+| Sarah | `.vault` container serialization and validation (`container.py`). |
+| Ana Paula | Authorized decryption and authentication checks (`decryption.py`). |
+| Bruno | GitHub Actions automated testing workflow and project documentation. |
+
+The team integrated contributions using GitHub branches and Pull Requests.
+
+## 12. Integration Results and Conclusion
+
+The integrated D3 checkpoint combines AES-256-GCM encryption, ECIES-based key protection, multi-recipient access, and a structured `.vault` container. **42 automated tests passed locally**, and the four demonstration scenarios were successfully verified: authorized encryption/decryption, second-recipient access, unauthorized-user rejection, and ciphertext tampering detection.
+
+These results support the functionality of the tested D2 and D3 components. The project remains a **development checkpoint**, with future work including persistent key management, digital signatures, a user interface, and dedicated secure file sharing.
