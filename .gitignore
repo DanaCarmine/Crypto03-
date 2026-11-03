@@ -15,3 +15,5 @@ __pycache__/
 # Environment variables
 .env
 .venv_python315/
+
+D2/demo_files/
