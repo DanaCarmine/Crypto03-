@@ -4,23 +4,13 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
-from src.key_management import (
-    get_key_fingerprint,
-    encrypt_file_key
-)
-
-from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-    Ed25519PrivateKey
-)
-
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
 from src.key_management import (
     get_key_fingerprint,
     encrypt_file_key
 )
-
 
 from src.container import (
     build_aad,
@@ -195,4 +185,66 @@ def encrypt_file(file_path, output_path, recipient_public_keys, signing_private_
     print(f"Signer ID: {signer_id}")
     print(f"Encrypted file: {output_path}")
 
-    
+def encrypt_file_legacy(file_path, output_path, recipient_public_keys):
+    """
+    Encrypt a file using the legacy D3 container format.
+
+    This function is provided only for backward compatibility.
+    New D5 files must use encrypt_file() with mandatory signing keys.
+    """
+
+    if not isinstance(recipient_public_keys, list):
+        raise ValueError("Recipient public keys must be provided as a list.")
+
+    if len(recipient_public_keys) < 2:
+        raise ValueError("At least two recipients are required.")
+
+    file_path = Path(file_path)
+
+    with file_path.open("rb") as file:
+        plaintext = file.read()
+
+    key = AESGCM.generate_key(bit_length=256)
+    nonce = os.urandom(12)
+
+    metadata = {
+        "filename": file_path.name,
+        "algorithm": "AES-256-GCM",
+        "key_encryption": "ECIES-secp256k1",
+        "version": "3.0",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+
+    recipients = []
+    recipient_ids = set()
+
+    for public_key in recipient_public_keys:
+        recipient_id = get_key_fingerprint(public_key)
+
+        if recipient_id in recipient_ids:
+            raise ValueError("Duplicate recipients are not allowed.")
+
+        recipient_ids.add(recipient_id)
+
+        encrypted_key = encrypt_file_key(public_key, key)
+
+        recipients.append({
+            "id": recipient_id,
+            "encrypted_key": encrypted_key.hex()
+        })
+
+    aad = build_aad(metadata, recipients)
+
+    aesgcm = AESGCM(key)
+    ciphertext = aesgcm.encrypt(nonce, plaintext, aad)
+
+    container = create_container(
+        metadata,
+        recipients,
+        nonce,
+        ciphertext
+    )
+
+    save_container(container, output_path)
+
+    print("Legacy D3 file encrypted successfully!")

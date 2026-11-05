@@ -4,7 +4,7 @@ import pytest
 
 from ecies.keys import PrivateKey
 
-from src.encryption import encrypt_file
+from src.encryption import encrypt_file_legacy as encrypt_file
 from src.key_management import decrypt_file_key, get_key_fingerprint
 from src.container import build_aad, load_container
 

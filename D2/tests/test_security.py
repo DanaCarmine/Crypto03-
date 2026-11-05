@@ -3,7 +3,7 @@ import pytest
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from src.encryption import encrypt_file
+from src.encryption import encrypt_file_legacy as encrypt_file
 from src.key_management import (
     generate_key_pair,
     get_key_fingerprint,
