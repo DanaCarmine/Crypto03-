@@ -44,6 +44,22 @@ def build_aad(metadata, recipients):
 
     return canonical_json(authenticated_data)
 
+def _decode_hex_field(value, field_name):
+    """
+    Decode a hexadecimal field using strict validation.
+    """
+
+    if not isinstance(value, str):
+        raise ValueError(f"Invalid {field_name} hexadecimal data.")
+
+    if len(value) % 2 != 0 or not re.fullmatch(
+        r"[0-9a-f]*", value
+    ):
+        raise ValueError(f"Invalid {field_name} hexadecimal data.")
+
+    return bytes.fromhex(value)
+
+
 def create_container(metadata, recipients, nonce, ciphertext):
     """
     Create a vault container for multiple recipients.
@@ -120,11 +136,10 @@ def create_container(metadata, recipients, nonce, ciphertext):
 
 def save_container(container, file_path):
     """
-    Save a vault container as a JSON file.
+    Validate and save a vault container as JSON.
 
-    Args:
-        container (dict): Vault container.
-        file_path (str): Destination file path.
+    D5 containers must include a valid signer fingerprint
+    and an Ed25519 signature.
     """
 
     if not isinstance(container, dict):
@@ -134,6 +149,66 @@ def save_container(container, file_path):
 
     if path.suffix.lower() != ".vault":
         raise ValueError("The file must have a .vault extension.")
+
+    metadata = container.get("metadata")
+
+    if not isinstance(metadata, dict):
+        raise ValueError("Invalid container metadata.")
+
+    version = metadata.get("version")
+
+    if version == "5.0":
+        required_fields = {
+            "metadata",
+            "recipients",
+            "nonce",
+            "ciphertext",
+            "signer_id",
+            "signature"
+        }
+
+        if set(container.keys()) != required_fields:
+            raise ValueError("Invalid D5 container structure.")
+
+        signer_id = container["signer_id"]
+        signature = container["signature"]
+
+        if not isinstance(signer_id, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", signer_id
+        ):
+            raise ValueError("Invalid signer fingerprint.")
+
+        if not isinstance(signature, str) or not re.fullmatch(
+            r"[0-9a-f]{128}", signature
+        ):
+            raise ValueError("Invalid Ed25519 signature format.")
+
+    elif version == "3.0":
+        required_fields = {
+            "metadata",
+            "recipients",
+            "nonce",
+            "ciphertext"
+        }
+
+        if set(container.keys()) != required_fields:
+            raise ValueError("Invalid D3 container structure.")
+
+    else:
+        raise ValueError("Unsupported container version.")
+
+    # Validate the complete structure before writing
+    nonce = _decode_hex_field(container.get("nonce"), "nonce")
+    ciphertext = _decode_hex_field(
+        container.get("ciphertext"), "ciphertext"
+    )
+
+    create_container(
+        metadata,
+        container.get("recipients"),
+        nonce,
+        ciphertext
+    )
 
     with path.open("w", encoding="utf-8") as file:
         json.dump(
@@ -146,13 +221,9 @@ def save_container(container, file_path):
 
 def load_container(file_path):
     """
-    Load and validate a vault container from a JSON file.
+    Load and validate a D3 or D5 vault container.
 
-    Args:
-        file_path (str): Path to the vault file.
-
-    Returns:
-        dict: Validated vault container.
+    D5 containers must include signer_id and signature.
     """
 
     path = Path(file_path)
@@ -166,29 +237,108 @@ def load_container(file_path):
     if not isinstance(container, dict):
         raise ValueError("Invalid vault container.")
 
-    required_fields = {
+    metadata = container.get("metadata")
+
+    if not isinstance(metadata, dict):
+        raise ValueError("Invalid container metadata.")
+
+    version = metadata.get("version")
+
+    base_fields = {
         "metadata",
         "recipients",
         "nonce",
         "ciphertext"
     }
 
-    if set(container.keys()) != required_fields:
-        raise ValueError("Invalid vault container structure.")
+    if version == "5.0":
+        required_fields = base_fields | {
+            "signer_id",
+            "signature"
+        }
 
-    # Validate hexadecimal encoding
-    try:
-        nonce = bytes.fromhex(container["nonce"])
-        ciphertext = bytes.fromhex(container["ciphertext"])
-    except (TypeError, ValueError):
-        raise ValueError("Invalid hexadecimal data in vault container.")
+        if set(container.keys()) != required_fields:
+            raise ValueError("Invalid D5 container structure.")
 
-    # Reuse the validation rules from create_container
+        signer_id = container["signer_id"]
+        signature = container["signature"]
+
+        if not isinstance(signer_id, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", signer_id
+        ):
+            raise ValueError("Invalid signer fingerprint.")
+
+        if not isinstance(signature, str) or not re.fullmatch(
+            r"[0-9a-f]{128}", signature
+        ):
+            raise ValueError("Invalid Ed25519 signature format.")
+
+    elif version == "3.0":
+        if set(container.keys()) != base_fields:
+            raise ValueError("Invalid D3 container structure.")
+
+    else:
+        raise ValueError("Unsupported container version.")
+
+    nonce = _decode_hex_field(container["nonce"], "nonce")
+    ciphertext = _decode_hex_field(
+        container["ciphertext"], "ciphertext"
+    )
+
     validated_container = create_container(
-        container["metadata"],
+        metadata,
         container["recipients"],
         nonce,
         ciphertext
     )
 
+    if version == "5.0":
+        validated_container["signer_id"] = container["signer_id"]
+        validated_container["signature"] = container["signature"]
+
     return validated_container
+
+def build_signature_payload(container):
+    """
+    Build the canonical data that will be digitally signed.
+
+    The signature protects metadata, recipients, nonce,
+    ciphertext, and signer identification.
+
+    Args:
+        container (dict): Vault container.
+
+    Returns:
+        bytes: Canonical JSON data ready for signing.
+    """
+
+    if not isinstance(container, dict):
+        raise ValueError("Container must be a dictionary.")
+
+    required_fields = {
+        "metadata",
+        "recipients",
+        "nonce",
+        "ciphertext",
+        "signer_id"
+    }
+
+    if not required_fields.issubset(container.keys()):
+        raise ValueError("Missing fields required for digital signature.")
+
+    signer_id = container["signer_id"]
+
+    if not isinstance(signer_id, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", signer_id
+    ):
+        raise ValueError("Invalid signer fingerprint.")
+
+    signed_data = {
+        "metadata": container["metadata"],
+        "recipients": container["recipients"],
+        "nonce": container["nonce"],
+        "ciphertext": container["ciphertext"],
+        "signer_id": signer_id
+    }
+
+    return canonical_json(signed_data)
