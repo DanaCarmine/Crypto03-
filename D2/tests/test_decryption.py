@@ -4,7 +4,7 @@ import json
 import pytest
 
 from src.encryption import encrypt_file_legacy as encrypt_file
-from src.decryption import decrypt_file
+from src.decryption import decrypt_file_legacy as decrypt_file
 from src.key_management import generate_key_pair
 
 
