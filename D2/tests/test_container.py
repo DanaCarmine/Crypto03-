@@ -1,5 +1,5 @@
 import copy
-
+import json
 import pytest
 
 from src.container import (
@@ -223,7 +223,10 @@ def test_load_invalid_nonce(vault_data, tmp_path):
         "ciphertext": ciphertext.hex()
     }
 
-    save_container(container, file_path)
+    file_path.write_text(
+    json.dumps(container),
+    encoding="utf-8"
+)
 
     with pytest.raises(ValueError):
         load_container(file_path)
@@ -246,7 +249,10 @@ def test_load_invalid_recipient(vault_data, tmp_path):
         "ciphertext": ciphertext.hex()
     }
 
-    save_container(container, file_path)
+    file_path.write_text(
+    json.dumps(container),
+    encoding="utf-8"
+)
 
     with pytest.raises(ValueError):
         load_container(file_path)
