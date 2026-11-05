@@ -1,4 +1,4 @@
-from src.encryption import encrypt_file
+from src.encryption import encrypt_file_legacy as encrypt_file
 from src.key_management import generate_key_pair
 from src.container import load_container
 
