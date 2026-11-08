@@ -789,3 +789,201 @@ The team integrated contributions using GitHub branches and Pull Requests.
 The integrated D3 checkpoint combines AES-256-GCM encryption, ECIES-based key protection, multi-recipient access, and a structured `.vault` container. **42 automated tests passed locally**, and the four demonstration scenarios were successfully verified: authorized encryption/decryption, second-recipient access, unauthorized-user rejection, and ciphertext tampering detection.
 
 These results support the functionality of the tested D2 and D3 components. The project remains a **development checkpoint**, with future work including persistent key management, digital signatures, a user interface, and dedicated secure file sharing.
+
+# D5 — Digital Signatures and Secure File Verification
+
+## Overview
+
+Deliverable 5 extends the Secure Digital Document Vault with *Ed25519 digital signatures. Files are encrypted using **AES-256-GCM, while the AES file key is encrypted separately for each authorized recipient using **ECIES (secp256k1). The sender signs the encrypted container, and the recipient must verify the signature using a trusted sender public key **before* attempting key recovery or file decryption.
+
+## Cryptographic Design
+
+### Chosen signature algorithm
+
+We selected *Ed25519*, a modern digital signature algorithm based on elliptic-curve cryptography. It provides strong authentication and integrity protection with compact keys and signatures. In this project, the raw Ed25519 private and public keys are each 32 bytes, and each signature is 64 bytes.
+
+The src/digital_signature.py module implements:
+
+- generate_signing_key_pair() — creates an Ed25519 key pair.
+- get_signer_fingerprint() — calculates a SHA-256 fingerprint of the sender's public key.
+- sign_data() — signs a byte sequence with the sender's private key.
+- verify_signature() — verifies a signature using the sender's public key.
+
+### What data is signed?
+
+The D5 signature covers a canonical byte representation of these container fields:
+
+| Field | Why it is protected |
+|---|---|
+| metadata | Protects the filename, algorithms, version, and creation timestamp from undetected modification. |
+| recipients | Protects the authorized recipient list and encrypted AES keys. |
+| nonce | Protects the AES-GCM nonce used for encryption. |
+| ciphertext | Protects the encrypted document and its authentication tag. |
+| signer_id | Binds the claimed sender identifier to the signed data. |
+
+The signature field itself is *excluded* from the signed payload, because a signature cannot include itself. The function build_signature_payload() in src/container.py produces the representation used for both signing and verification. Both operations must use exactly the same canonicalization rules.
+
+### Why are hash functions important for digital signatures?
+
+Hash functions transform data into fixed-length digests and are commonly used in digital signature schemes to make signing large messages efficient and to bind signatures to message contents. A secure hash also makes it computationally difficult to find two different messages with the same digest.
+
+*Important distinction for this implementation:* Ed25519 already incorporates hashing internally as part of its signature algorithm. Therefore, *we do not manually apply SHA-256 to the container before calling sign_data()*. The canonical payload bytes are passed directly to Ed25519, which handles its required hashing internally. Applying a separate hash first would change the signed message and is not required by our design.
+
+We use *SHA-256 separately* to calculate the signer_id and recipient fingerprints. These fingerprints help identify keys, but *they do not replace digital signature verification or establish trust by themselves*.
+
+## Security Decisions
+
+### Why sign the ciphertext instead of the plaintext?
+
+We sign the encrypted container because the recipient must be able to verify its authenticity *before decryption*. Signing only the plaintext would require recovering the AES key and decrypting the file before the signature could be checked.
+
+Signing the ciphertext and its security-relevant metadata allows the system to reject modified or untrusted containers early. It also binds the signature to the actual encrypted object distributed to recipients, including the recipient information and nonce. This does not replace AES-GCM authentication; the two mechanisms provide complementary checks.
+
+### What happens if the signature is not verified first?
+
+If decryption starts before signature verification, an attacker may be able to make the application process a modified or untrusted container. Even if AES-GCM eventually detects tampering, the application has already performed unnecessary cryptographic operations on data whose sender has not been authenticated.
+
+Our D5 decryption function follows this order:
+
+1. Load and validate the D5 container.
+2. Check that the trusted sender public key matches the claimed signer_id.
+3. Rebuild the canonical signature payload.
+4. Verify the Ed25519 signature.
+5. *Only if verification succeeds*, identify the recipient and recover the AES key with ECIES.
+6. Decrypt the file with AES-256-GCM and save the recovered plaintext.
+
+Security tests use mocks to confirm that invalid signatures prevent ECIES key recovery and AES-GCM decryption.
+
+### What happens if metadata is excluded from the signature?
+
+If metadata is not signed, an attacker could modify fields such as the filename, version, algorithm identifiers, or creation timestamp *without invalidating the digital signature*. Some modifications might still be detected by AES-GCM because the current implementation also authenticates metadata as AAD, but that check happens during decryption—not at the initial signature-verification stage.
+
+Including metadata in the Ed25519 signature allows the recipient to detect such changes *before* recovering the AES key. The recipient list, nonce, ciphertext, and sender identifier are also signed to avoid leaving important security decisions outside the authenticated payload.
+
+## Encryption and Decryption Workflow
+
+text
+Original document
+       |
+       v
+Generate a fresh AES-256 key and nonce
+       |
+       v
+Encrypt file using AES-256-GCM
+       |
+       v
+Encrypt AES key for Alice and Bob using ECIES
+       |
+       v
+Build D5 container and add signer_id
+       |
+       v
+Sign canonical container payload with Ed25519
+       |
+       v
+Signed .vault file
+       |
+       v
+Verify sender identity and Ed25519 signature
+       |
+       +---- Invalid ---> Reject without decrypting
+       |
+       v
+Recover recipient's AES key using ECIES
+       |
+       v
+Decrypt using AES-256-GCM
+       |
+       v
+Recovered original document
+
+
+## Main Project Files
+
+text
+D2/
+├── src/
+│   ├── container.py
+│   ├── decryption.py
+│   ├── digital_signature.py
+│   ├── encryption.py
+│   └── key_management.py
+├── tests/
+│   ├── test_decryption_d5.py
+│   ├── test_decryption_d5_security.py
+│   └── test_integration_d5.py
+├── demo_D5.py
+├── requirements.txt
+└── README.md
+
+
+encrypt_file() produces signed D5 containers. decrypt_file() requires the trusted Ed25519 public key and rejects unsigned D3 containers. The separate encrypt_file_legacy() and decrypt_file_legacy() functions preserve D3 behavior without allowing the D5 verification requirement to be bypassed through the D5 interface.
+
+## Installation
+
+From the D2 directory, create and activate a virtual environment, then install the project dependencies:
+
+powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+
+
+## Running the D5 Demo
+
+powershell
+python demo_D5.py
+
+
+The demonstration generates temporary keys and a sample document, encrypts and signs it, and checks seven scenarios:
+
+1. A signed D5 container is created.
+2. Alice successfully decrypts the document.
+3. Bob successfully decrypts the same document.
+4. An unauthorized recipient is rejected.
+5. A modified digital signature is rejected.
+6. An untrusted signer is rejected.
+7. An unsigned D3 container is rejected by D5 decryption.
+
+Observed demonstration result:
+
+text
+Passed: 7/7
+[SUCCESS] All D5 demonstration scenarios passed!
+
+
+The demo uses a temporary directory and removes generated files when it finishes.
+
+## Automated Testing
+
+Run the complete test suite:
+
+powershell
+python -m pytest tests/ -v
+
+
+Run the D5-specific tests:
+
+powershell
+python -m pytest tests/test_decryption_d5.py -v
+python -m pytest tests/test_decryption_d5_security.py -v
+python -m pytest tests/test_integration_d5.py -v
+
+
+The D5 tests cover authorized decryption, signature and metadata tampering, untrusted signers, legacy-container rejection, and checks that invalid signatures block decryption operations. The integration tests exercise the combined encryption, signing, verification, and decryption workflow.
+
+The team previously observed *105 passing tests* before adding the new integration test file. Re-run the complete suite after merging Bruno's changes and update this count only after confirming the new result.
+
+The repository also uses GitHub Actions during the Pull Request process; confirm that its workflow runs the complete test suite.
+
+## Limitations and Key Management
+
+- A trusted sender public key must be obtained through an authenticated channel. A fingerprint inside the .vault file alone cannot establish trust.
+- Private signing and recipient keys must not be committed to the repository.
+- Random keys generated during the demo are for demonstration purposes only.
+- Production deployment would require secure key storage, key rotation, and additional security review.
+- Digital signatures provide authenticity and integrity, *not confidentiality*; confidentiality is provided by encryption.
+
+## Conclusion
+
+D5 combines AES-256-GCM encryption, ECIES multi-recipient key management, and Ed25519 digital signatures. Signing the encrypted container and its security-relevant metadata enables the system to verify authenticity before decryption. Automated tests and the end-to-end demo provide evidence that authorized recipients can recover documents while altered signatures and untrusted senders are rejected.
