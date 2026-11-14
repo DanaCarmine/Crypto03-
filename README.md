@@ -987,3 +987,750 @@ The repository also uses GitHub Actions during the Pull Request process; confirm
 ## Conclusion
 
 D5 combines AES-256-GCM encryption, ECIES multi-recipient key management, and Ed25519 digital signatures. Signing the encrypted container and its security-relevant metadata enables the system to verify authenticity before decryption. Automated tests and the end-to-end demo provide evidence that authorized recipients can recover documents while altered signatures and untrusted senders are rejected.
+
+# D6 – Secure Cryptographic Key Management
+
+## 1. Introduction
+
+Deliverable 6 (D6) focuses on the secure management of cryptographic keys in our Secure File Exchange Platform.
+
+In previous deliverables, we implemented file encryption using AES-256-GCM and hybrid encryption using ECIES. However, protecting encrypted files is not enough if private keys are stored without security.
+
+For this reason, D6 introduces a key management system that protects private keys using password-based encryption.
+
+Our implementation includes:
+
+- Secure private key storage.
+- Password-based key access.
+- Key lifecycle management.
+- Key rotation and revocation.
+- Encrypted backup and recovery.
+- Integration testing.
+
+The main objective is to reduce the risk of unauthorized access to private keys and provide a practical way to manage them throughout their lifecycle.
+
+---
+
+## 2. Key Management Design
+
+Our system uses a modular architecture. Each module is responsible for a specific part of cryptographic key management.
+
+### 2.1 System Modules
+
+| Module | Responsibility |
+|---|---|
+| `key_management.py` | Generates ECIES key pairs and encrypts or decrypts AES file keys. |
+| `secure_keystore.py` | Encrypts, decrypts, saves, and loads private keys. |
+| `key_access.py` | Provides password-based access to encrypted private keys. |
+| `key_lifecycle.py` | Manages key registration, rotation, retirement, and revocation. |
+| `key_backup.py` | Creates and restores encrypted private key backups. |
+| `integration_demo.py` | Demonstrates how the different modules work together. |
+
+### 2.2 Key Generation
+
+The system generates asymmetric key pairs using the `secp256k1` elliptic curve.
+
+Each key pair contains:
+
+- A 32-byte private key.
+- A 33-byte compressed public key.
+
+The public key is used to encrypt an AES file key using ECIES.
+
+The corresponding private key is required to recover that AES key.
+
+Because the private key is sensitive, it must be protected before being stored.
+
+The KeyStore module also supports 32-byte Ed25519 private keys for signing purposes.
+
+### 2.3 Private Key Protection
+
+Instead of saving the private key directly, the system encrypts it using AES-256-GCM.
+
+The encryption key is derived from a user-provided password using Argon2id.
+
+The encrypted private key and the information required for decryption are stored in a JSON KeyStore.
+
+The password itself is not stored.
+
+### 2.4 Password-Based Key Access
+
+When a user needs a private key, the system loads the encrypted KeyStore.
+
+Before decryption, the system validates the expected:
+
+- Key identifier.
+- Cryptographic algorithm.
+- Key purpose.
+
+The user must provide the correct password to decrypt the private key.
+
+If the password is incorrect or the authenticated encrypted data has been modified, the operation is rejected.
+
+### 2.5 Key Lifecycle Management
+
+The system supports three key states:
+
+| Status | Description |
+|---|---|
+| `ACTIVE` | The key is registered as active. |
+| `RETIRED` | The key has been replaced by a new key. |
+| `REVOKED` | The key has been marked as revoked. |
+
+The lifecycle manager allows keys to be registered, rotated, and revoked.
+
+Key rotation generates a new ECIES key pair and stores the new private key in an encrypted KeyStore.
+
+After successful rotation:
+
+- The previous key becomes `RETIRED`.
+- The replacement key becomes `ACTIVE`.
+- The new public key can be used to encrypt AES file keys.
+
+Lifecycle information is currently stored in memory.
+
+**Important:** The lifecycle manager records key states, but the current key access module does not automatically enforce revocation.
+
+---
+
+## 3. KDF Selection and Parameters
+
+### 3.1 What Is a KDF?
+
+A Key Derivation Function (KDF) transforms a password into a cryptographic key.
+
+In our system, the derived key is used to encrypt and decrypt private keys.
+
+A KDF is necessary because user passwords do not normally provide the same security properties as randomly generated cryptographic keys.
+
+### 3.2 Why We Selected Argon2id
+
+We selected Argon2id because it is designed to make password-guessing attacks computationally expensive.
+
+Argon2id uses configurable memory and processing resources.
+
+This makes large-scale password guessing more difficult compared with using a simple hash function.
+
+Argon2id is also suitable for password-based key derivation.
+
+### 3.3 KDF Parameters
+
+Our implementation uses the following Argon2id parameters:
+
+| Parameter | Value | Description |
+|---|---|---|
+| Algorithm | Argon2id | Password-based key derivation algorithm. |
+| Memory cost | 65,536 KiB (64 MiB) | Memory required during key derivation. |
+| Iterations | 3 | Number of processing passes. |
+| Parallelism | 4 lanes | Degree of parallel processing. |
+| Derived key length | 32 bytes (256 bits) | Length of the generated encryption key. |
+| Salt size | 16 bytes (128 bits) | Random salt generated for each KeyStore. |
+| AES-GCM nonce size | 12 bytes (96 bits) | Random nonce used during private key encryption. |
+
+These parameters make password-guessing attacks more computationally expensive while keeping key derivation practical for our educational implementation.
+
+The system also validates KDF parameters before using them.
+
+The maximum accepted values are:
+
+- Memory cost: 262,144 KiB (256 MiB).
+- Iterations: 10.
+- Parallelism: 8 lanes.
+
+These limits help prevent the system from accepting excessively expensive KDF configurations.
+
+### 3.4 Why We Use a Random Salt
+
+A new random salt is generated when encrypting a private key.
+
+The salt helps prevent identical passwords from producing identical derived keys across different KeyStores.
+
+It also makes precomputed password attacks less practical.
+
+The salt is stored in the KeyStore because it is required during decryption.
+
+The salt does not need to be secret.
+
+### 3.5 Security Considerations
+
+Argon2id increases the computational cost of password-guessing attacks.
+
+However, it cannot guarantee security if the user chooses a weak or predictable password.
+
+For this reason, users should select long, unique passwords.
+
+---
+
+## 4. Encrypted Key Storage Format
+
+### 4.1 Storage Format
+
+Our implementation stores encrypted private keys in JSON files.
+
+Each KeyStore contains exactly nine main fields:
+
+| Field | Description |
+|---|---|
+| `version` | Identifies the KeyStore format version. |
+| `key_id` | Unique identifier assigned to the private key. |
+| `algorithm` | Cryptographic algorithm associated with the key. |
+| `purpose` | Intended purpose of the private key. |
+| `kdf` | Argon2id configuration and parameters. |
+| `encryption` | Encryption algorithm used to protect the private key. |
+| `salt` | Random salt used during key derivation. |
+| `nonce` | Random nonce used during AES-GCM encryption. |
+| `ciphertext` | Encrypted private key and authentication tag. |
+
+The current KeyStore version is `1.0`.
+
+The system supports the following algorithm and purpose combinations:
+
+- `secp256k1` with `decryption`.
+- `Ed25519` with `signing`.
+
+The encryption algorithm is `AES-256-GCM`.
+
+The `kdf` object contains:
+
+- `name`
+- `memory_cost`
+- `iterations`
+- `lanes`
+- `length`
+
+The `salt`, `nonce`, and `ciphertext` values are encoded using Base64 so they can be stored in JSON.
+
+The password and plaintext private key are not stored in the KeyStore.
+
+### 4.2 KeyStore JSON Structure
+
+The following example shows the structure of an encrypted KeyStore:
+
+```json
+{
+    "version": "1.0",
+    "key_id": "demo-key-001",
+    "algorithm": "secp256k1",
+    "purpose": "decryption",
+    "kdf": {
+        "name": "Argon2id",
+        "memory_cost": 65536,
+        "iterations": 3,
+        "lanes": 4,
+        "length": 32
+    },
+    "encryption": "AES-256-GCM",
+    "salt": "<base64-encoded-salt>",
+    "nonce": "<base64-encoded-nonce>",
+    "ciphertext": "<base64-encoded-ciphertext-and-tag>"
+}
+```
+
+This example represents the KeyStore structure.
+
+The values between angle brackets are placeholders, not real encrypted data.
+
+The private key is encrypted before being stored, and the password is never included in the JSON file.
+
+### 4.3 AES-256-GCM
+
+We selected AES-256-GCM to protect private keys.
+
+AES-256-GCM provides:
+
+- Confidentiality through encryption.
+- Integrity protection through authenticated encryption.
+- Detection of unauthorized modifications to authenticated data.
+
+AES-GCM uses a nonce during encryption.
+
+Our implementation generates a random 12-byte nonce using the operating system's secure random number generator.
+
+The system must avoid reusing the same nonce with the same encryption key.
+
+### 4.4 Additional Authenticated Data (AAD)
+
+Our implementation uses Additional Authenticated Data (AAD) to protect KeyStore metadata.
+
+The authenticated metadata includes:
+
+- KeyStore version.
+- Key identifier.
+- Cryptographic algorithm.
+- Key purpose.
+- KDF configuration.
+- Encryption algorithm.
+- Salt.
+- Nonce.
+
+Before encryption, the metadata is converted into a canonical JSON representation.
+
+AES-256-GCM authenticates this information together with the encrypted private key.
+
+If an attacker modifies the authenticated metadata or ciphertext, decryption fails.
+
+This prevents undetected modifications to the protected KeyStore information.
+
+### 4.5 Why We Selected JSON
+
+JSON was selected because it is:
+
+- Simple to read.
+- Easy to process in Python.
+- Suitable for structured metadata.
+- Convenient for testing and debugging.
+
+However, JSON itself does not provide cryptographic protection.
+
+The confidentiality of the private key depends on AES-256-GCM and the password-derived encryption key.
+
+---
+
+## 5. Backup and Recovery Strategy
+
+### 5.1 Backup Creation
+
+Our system allows users to create backups of encrypted KeyStore files.
+
+The backup process copies the encrypted KeyStore without decrypting the private key.
+
+This means that private keys remain encrypted in backup files.
+
+The implementation also prevents accidental overwriting of existing backup files.
+
+### 5.2 Backup Restoration
+
+To restore a backup, the user must provide the correct password.
+
+The system performs the following operations:
+
+1. Verifies that the backup file exists.
+2. Validates the KeyStore structure.
+3. Attempts authenticated decryption using the password.
+4. Rejects incorrect passwords or modified encrypted data.
+5. Saves the verified encrypted KeyStore to the destination.
+
+The restored KeyStore contains encrypted key material rather than a plaintext private key.
+
+### 5.3 Security Benefits
+
+The backup strategy provides several benefits:
+
+- Private keys remain encrypted during backup.
+- Incorrect passwords prevent restoration.
+- AES-GCM authentication detects modifications to encrypted data.
+- Existing destination files cannot be overwritten accidentally.
+- Restored KeyStores can recover the original private key.
+
+### 5.4 Backup Limitations
+
+The current implementation does not provide:
+
+- Automatic backup scheduling.
+- Remote backup storage.
+- Backup version management.
+- Protection against rollback to an older valid KeyStore.
+- Recovery when both the original KeyStore and all backups are lost.
+
+For a production system, additional backup policies and secure storage mechanisms would be necessary.
+
+---
+
+## 6. Security Assumptions
+
+Our implementation is based on the following assumptions:
+
+1. **Strong passwords:** Users choose sufficiently strong passwords and keep them confidential.
+
+2. **Trusted execution environment:** The operating system and application are not fully controlled by an attacker.
+
+3. **Secure cryptographic libraries:** The cryptographic libraries correctly implement Argon2id, AES-256-GCM, and ECIES.
+
+4. **Secure randomness:** The operating system provides a cryptographically secure random number generator.
+
+5. **Protected storage:** KeyStore files and backups are stored in locations with appropriate access controls.
+
+6. **Authorized users:** Only authorized users can access sensitive application operations.
+
+7. **Lifecycle enforcement:** Applications using the lifecycle manager must verify key status before operations that require an active key.
+
+These assumptions are important because cryptographic algorithms cannot protect against every possible security threat.
+
+---
+
+## 7. Security Discussion
+
+### 7.1 Why Should Private Keys Be Encrypted?
+
+Private keys are essential for protecting encrypted information.
+
+If an attacker obtains an unencrypted private key, they may be able to recover AES file keys encrypted for its corresponding public key.
+
+This could compromise the confidentiality of protected files.
+
+Encrypting private keys adds another layer of security.
+
+Even if an attacker obtains a copy of the KeyStore, they must still recover the correct password-derived encryption key to access the private key.
+
+For this reason, our system protects private keys using Argon2id and AES-256-GCM.
+
+### 7.2 What Happens if the Password Is Weak?
+
+A weak password reduces the security of the system.
+
+If an attacker obtains an encrypted KeyStore, they may attempt an offline dictionary attack or brute-force attack.
+
+Argon2id makes password guessing more expensive, but it cannot guarantee security when the password is easy to predict.
+
+If the attacker discovers the password, they may decrypt the private key.
+
+For this reason, users should choose long and unique passwords.
+
+### 7.3 What Are the Limitations of Our System?
+
+Although our implementation provides important security mechanisms, it has several limitations.
+
+**In-memory lifecycle management**
+
+Key registration, rotation, and revocation information is stored in memory.
+
+This information is lost when the lifecycle manager is recreated or the application closes.
+
+**Revocation enforcement**
+
+Revoking a key changes its status to `REVOKED`.
+
+However, the current key access module does not automatically check this status.
+
+A user who possesses the encrypted KeyStore and its password may still be able to decrypt the private key.
+
+**Password security**
+
+The system depends on the strength and confidentiality of user passwords.
+
+A weak or compromised password can expose encrypted private keys.
+
+**File protection**
+
+The current implementation does not provide a complete operating-system-level access control solution for KeyStore files.
+
+**Backup management**
+
+The system supports manual encrypted backups but does not include automatic scheduling or remote backup management.
+
+**Key rotation**
+
+Generating a replacement key does not automatically re-encrypt AES file keys previously encrypted for the old public key.
+
+**Production readiness**
+
+The implementation is an educational prototype.
+
+Additional security reviews, persistent storage, access control, auditing, and operational protections would be required before using it in a production environment.
+
+---
+
+## 8. D1 Security Analysis Revisited
+
+In Deliverable 1 (D1), we analyzed the security architecture of our Secure File Exchange Platform.
+
+The analysis included:
+
+- Sensitive assets.
+- Trust boundaries.
+- Possible threats.
+- Potential attack scenarios.
+- Security assumptions.
+
+One of the main concerns was protecting cryptographic keys from unauthorized access.
+
+In D6, we introduced encrypted private key storage, password-based access, key lifecycle management, and backup recovery to reduce some of these risks.
+
+However, these mechanisms do not eliminate every possible attack.
+
+### 8.1 What Happens if an Attacker Steals the KeyStore?
+
+If an attacker obtains a copy of the KeyStore, they can access the encrypted private key and the information required to attempt password guessing.
+
+However, the private key is protected using AES-256-GCM, and its encryption key is derived from a password using Argon2id.
+
+This means that stealing the KeyStore does not immediately reveal the private key.
+
+The attacker would need to recover the correct password or otherwise obtain the encryption key.
+
+Argon2id makes password-guessing attacks more expensive, but it does not make them impossible.
+
+**Protection provided:**
+
+Encryption protects private keys against direct disclosure when an attacker steals the KeyStore file.
+
+**Remaining risk:**
+
+If the password is weak or compromised, the attacker may be able to decrypt the private key.
+
+### 8.2 What Happens if the Password Is Weak?
+
+If a user selects a weak password, an attacker who obtains the encrypted KeyStore may attempt an offline dictionary attack or brute-force attack.
+
+For example, passwords such as `123456`, `password123`, or common personal information are easier to guess.
+
+Although Argon2id increases the computational cost of each password attempt, it cannot compensate for a predictable password.
+
+If the attacker discovers the password, they may decrypt the private key and recover AES file keys encrypted for the corresponding public key.
+
+**Protection provided:**
+
+Argon2id slows down password-guessing attempts.
+
+**Remaining risk:**
+
+The system cannot guarantee the security of a private key protected by a weak password.
+
+For this reason, users should choose long, unique passwords.
+
+### 8.3 What Happens if a Device Is Compromised?
+
+If an attacker compromises a device, the consequences depend on the level of access obtained.
+
+For example, malware running on the device could:
+
+- Capture the password when the user enters it.
+- Access private keys after they have been decrypted in memory.
+- Modify application files.
+- Interfere with cryptographic operations.
+- Copy encrypted KeyStores and other sensitive information.
+
+Our system protects private keys while they are stored in encrypted files.
+
+However, when a private key is unlocked, it must temporarily exist in memory so the application can use it.
+
+If an attacker controls the operating system or application process, encryption at rest may not prevent access to decrypted information.
+
+**Protection provided:**
+
+Private keys remain encrypted while stored in the KeyStore.
+
+**Remaining risk:**
+
+The system cannot guarantee the protection of passwords or decrypted private keys on a fully compromised device.
+
+Additional protections, such as operating system security, malware prevention, and hardware-backed key storage, would be necessary in a production environment.
+
+### 8.4 What Does Our System Protect Against?
+
+Our implementation provides protection against several threats:
+
+| Threat | Protection |
+|---|---|
+| Theft of an encrypted KeyStore | AES-256-GCM protects the private key from direct disclosure. |
+| Modification of encrypted private key data | AES-GCM authentication detects unauthorized modifications. |
+| Modification of authenticated metadata | Authenticated metadata validation detects changes. |
+| Password-guessing attacks | Argon2id increases the computational cost of password attempts. |
+| Accidental exposure of private keys in backups | Backups preserve the encrypted KeyStore. |
+| Incorrect password during recovery | Authentication fails and restoration is rejected. |
+| Accidental overwriting of backup files | The implementation rejects existing destination files. |
+
+These mechanisms reduce the risk of unauthorized access to cryptographic keys.
+
+However, their effectiveness depends on the security assumptions of the system.
+
+### 8.5 What Does Our System NOT Protect Against?
+
+Our implementation does not provide complete protection against the following threats:
+
+| Threat | Limitation |
+|---|---|
+| Weak or compromised passwords | An attacker may recover the private key by discovering the password. |
+| Malware or a compromised operating system | Malware may capture passwords or decrypted keys from memory. |
+| Unauthorized access to an unlocked private key | The system cannot fully protect plaintext key material while it is being used. |
+| Theft of both the KeyStore and its password | The attacker may decrypt the private key. |
+| Reuse of revoked keys | Revocation is recorded in memory but is not automatically enforced during decryption. |
+| Loss of lifecycle information | Key status information is not persistent across application restarts. |
+| Replacement with an older valid KeyStore | The implementation does not provide rollback protection. |
+| Loss of both the KeyStore and its backups | The private key may become permanently unavailable. |
+| Previously encrypted file keys after rotation | Rotation does not automatically re-encrypt existing file keys. |
+
+### 8.6 Security Assumptions from D1
+
+Our security model depends on the following assumptions:
+
+1. The device and operating system are not fully controlled by an attacker.
+2. Users choose strong passwords and keep them confidential.
+3. Cryptographic libraries operate correctly.
+4. The operating system provides secure randomness.
+5. KeyStore files are stored with appropriate access controls.
+6. Only authorized users can perform sensitive operations.
+7. Applications verify lifecycle status before using keys that must be active.
+
+If these assumptions are not satisfied, the security guarantees of the system may be reduced.
+
+### 8.7 Connection Between D1 and D6
+
+In D1, we identified private keys as sensitive assets and considered threats such as unauthorized access, information disclosure, and compromised devices.
+
+D6 addresses some of these threats through the following mechanisms:
+
+| D1 Security Concern | D6 Security Mechanism |
+|---|---|
+| Unauthorized disclosure of private keys | AES-256-GCM encrypted KeyStore. |
+| Password-guessing attacks | Argon2id key derivation. |
+| Unauthorized modification of encrypted key data | AES-GCM authentication. |
+| Accidental loss of stored keys | Encrypted backup and recovery. |
+| Key replacement | Key rotation. |
+| Key revocation | Lifecycle status management. |
+| Compromised devices | Encryption at rest protects stored files, but does not prevent attacks on an actively compromised device. |
+
+The main improvement from D1 to D6 is that private keys are now protected through encrypted storage.
+
+Nevertheless, our security analysis shows that encryption alone is not sufficient to protect against every threat.
+
+### 8.8 Final Security Assessment
+
+Our D6 implementation improves the security of the Secure File Exchange Platform by protecting private keys at rest and providing basic key management functionality.
+
+The system is designed to reduce the impact of encrypted KeyStore theft, unauthorized data modification, and accidental key loss.
+
+However, it does not fully protect against compromised devices, weak passwords, or attackers who obtain decrypted key material.
+
+This demonstrates an important security principle: cryptographic protection depends not only on strong algorithms, but also on secure devices, user behavior, and correct key management practices.
+
+---
+
+## 9. Integration Demonstration
+
+The integration demonstration verifies that the different D6 modules work together.
+
+### 9.1 Integration Workflow
+
+The demonstration performs the following operations:
+
+1. Generate an ECIES key pair.
+2. Encrypt the private key using a password.
+3. Save the encrypted KeyStore.
+4. Register the key as `ACTIVE`.
+5. Unlock the private key.
+6. Encrypt and recover an AES file key using ECIES.
+7. Create an encrypted KeyStore backup.
+8. Restore the backup.
+9. Verify that the original private key can be recovered.
+10. Rotate the key.
+11. Verify that the replacement key can recover a new AES file key.
+12. Revoke the replacement key.
+
+### 9.2 Running the Demonstration
+
+From the `D2` directory, execute:
+
+```bash
+python -m src.integration_demo
+```
+
+The program requests a password.
+
+If all operations are completed successfully, it displays:
+
+```text
+=== DEMO COMPLETED SUCCESSFULLY ===
+```
+
+### 9.3 Temporary Files
+
+The integration demonstration uses temporary files.
+
+These files include:
+
+- The original encrypted KeyStore.
+- The encrypted backup.
+- The restored KeyStore.
+- The encrypted KeyStore generated during rotation.
+
+The temporary directory is automatically removed when the demonstration finishes.
+
+The demonstration does not print private keys or passwords.
+
+---
+
+## 10. Automated Testing
+
+We use `pytest` to verify the functionality and security behavior of the system.
+
+### 10.1 Integration Tests
+
+The integration tests are located in:
+
+`tests/test_integration.py`
+
+To execute them, run:
+
+```bash
+python -m pytest tests/test_integration.py -v
+```
+
+The integration tests verify:
+
+1. Complete D6 workflow execution.
+2. Rejection of empty passwords.
+3. Rejection of invalid password types.
+4. Execution with different valid passwords.
+5. Recovery of AES keys using restored KeyStores.
+6. Rejection of incorrect passwords.
+7. Cryptographic functionality after key rotation.
+8. Correct revocation status updates.
+
+**Integration test result: 8 tests passed.**
+
+### 10.2 Complete Test Suite
+
+To execute all automated tests:
+
+```bash
+python -m pytest tests/ -v
+```
+
+At the time of D6 integration, the complete test suite produced:
+
+**165 tests passed.**
+
+This result confirms that the tested D6 components work together without breaking the existing automated tests.
+
+### 10.3 Testing Limitations
+
+Passing automated tests does not guarantee that a system is completely secure.
+
+The tests verify the implemented behavior under specific conditions.
+
+Additional security analysis, penetration testing, code review, and operational controls would be necessary before using the system in production.
+
+---
+
+## 11. Conclusion
+
+Deliverable 6 improves the security of our Secure File Exchange Platform by introducing encrypted private key storage and key management functionality.
+
+We used Argon2id to derive encryption keys from passwords and AES-256-GCM to protect private keys.
+
+We also implemented password-based access, key rotation, revocation metadata, and encrypted backup and recovery.
+
+The integration demonstration and automated tests show that these components can work together successfully.
+
+By revisiting the security analysis from D1, we identified the threats that our implementation can reduce and the risks that remain.
+
+Our system provides protection against direct disclosure of private keys stored in encrypted KeyStores and helps detect unauthorized modifications to authenticated data.
+
+However, it does not fully protect against weak passwords, compromised devices, or attackers who obtain decrypted key material.
+
+Overall, D6 provides a foundation for secure cryptographic key management and demonstrates the importance of protecting private keys throughout their lifecycle.
+
+---
+
+## 12. References
+
+1. Biryukov, A., Dinu, D., & Khovratovich, D. (2016). *Argon2: New generation of memory-hard functions for password hashing and other applications*. IEEE European Symposium on Security and Privacy. https://doi.org/10.1109/EuroSP.2016.31
+
+2. National Institute of Standards and Technology. (2007). *Recommendation for block cipher modes of operation: Galois/Counter Mode (GCM) and GMAC* (NIST Special Publication 800-38D). https://doi.org/10.6028/NIST.SP.800-38D
+
+3. National Institute of Standards and Technology. (2020). *Recommendation for key management: Part 1 – General* (NIST Special Publication 800-57 Part 1, Revision 5). https://doi.org/10.6028/NIST.SP.800-57pt1r5
+
+4. Internet Research Task Force. (2021). *The memory-hard Argon2 password hash and proof-of-work function* (RFC 9106). https://doi.org/10.17487/RFC9106
+
+5. Python Cryptographic Authority. (n.d.). *Cryptography documentation*. https://cryptography.io/en/latest/
