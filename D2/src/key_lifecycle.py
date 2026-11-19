@@ -4,6 +4,7 @@ Manage key registration, revocation, rotation,
 and encrypted private key storage.
 """
 
+from src.key_registry import KeyRegistry
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -30,8 +31,29 @@ def current_timestamp():
 class KeyLifecycleManager:
     """Manage cryptographic key lifecycle metadata."""
 
-    def __init__(self):
-        self.keys = {}
+    def __init__(self, registry: KeyRegistry | None = None):
+        """
+        Initialize the key lifecycle manager.
+
+        If a registry is provided, load persistent key metadata.
+        Otherwise, use in-memory storage.
+        """
+
+        self.registry = registry
+
+        if self.registry is not None:
+            self.keys = self.registry.load_registry()
+        else:
+            self.keys = {}
+                
+    def _save_changes(self):
+            """
+            Persist key lifecycle metadata when a registry is configured.
+            """
+
+            if self.registry is not None:
+                self.registry.keys = self.keys
+                self.registry.save_registry()
 
     def register_key(self, key_id: str):
         """Register a new active key."""
@@ -45,12 +67,20 @@ class KeyLifecycleManager:
         timestamp = current_timestamp()
 
         self.keys[key_id] = {
-            "key_id": key_id,
-            "status": KeyStatus.ACTIVE.value,
-            "created_at": timestamp,
-            "updated_at": timestamp,
-            "replaced_by": None,
-        }
+                "key_id": key_id,
+                "status": KeyStatus.ACTIVE.value,
+                "created_at": timestamp,
+                "updated_at": timestamp,
+                "replaced_by": None,
+            }
+
+            # Persist the new key metadata
+        try:
+                self._save_changes()
+        except Exception:
+                # Restore the previous in-memory state
+                del self.keys[key_id]
+                raise
 
         return self.get_key(key_id)
 
@@ -63,15 +93,24 @@ class KeyLifecycleManager:
         return self.keys[key_id].copy()
 
     def revoke_key(self, key_id: str):
-        """Revoke a key."""
+        """Revoke a key and persist the updated metadata."""
 
         key = self.get_key(key_id)
 
         if key["status"] == KeyStatus.REVOKED.value:
             raise ValueError("Key is already revoked.")
 
+        # Update key status
         self.keys[key_id]["status"] = KeyStatus.REVOKED.value
         self.keys[key_id]["updated_at"] = current_timestamp()
+
+        # Persist changes
+        try:
+            self._save_changes()
+        except Exception:
+            # Restore previous metadata if saving fails
+            self.keys[key_id] = key
+            raise
 
         return self.get_key(key_id)
 
@@ -102,16 +141,34 @@ class KeyLifecycleManager:
             raise ValueError("New key ID already exists.")
 
         # Register the replacement key
-        new_key = self.register_key(new_key_id)
+        # Create the replacement key metadata
+        timestamp = current_timestamp()
+
+        self.keys[new_key_id] = {
+            "key_id": new_key_id,
+            "status": KeyStatus.ACTIVE.value,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "replaced_by": None,
+        }
 
         # Retire the previous key
         self.keys[old_key_id]["status"] = KeyStatus.RETIRED.value
-        self.keys[old_key_id]["updated_at"] = current_timestamp()
+        self.keys[old_key_id]["updated_at"] = timestamp
         self.keys[old_key_id]["replaced_by"] = new_key_id
+
+        # Persist both changes as a single registry update
+        try:
+            self._save_changes()
+        except Exception:
+            # Roll back the rotation in memory
+            del self.keys[new_key_id]
+            self.keys[old_key_id] = old_key
+            raise
 
         return {
             "old_key": self.get_key(old_key_id),
-            "new_key": new_key,
+            "new_key": self.get_key(new_key_id),
         }
 
     def rotate_encrypted_key(

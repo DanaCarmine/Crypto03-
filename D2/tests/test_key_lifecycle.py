@@ -5,7 +5,8 @@ D6 - Automated tests for cryptographic key lifecycle management.
 import os
 
 import pytest
-
+from src.key_registry import KeyRegistry
+from src.key_lifecycle import KeyLifecycleManager
 from src.key_lifecycle import KeyLifecycleManager
 from src.key_management import encrypt_file_key, decrypt_file_key
 from src.secure_keystore import load_encrypted_key, decrypt_private_key
@@ -178,3 +179,72 @@ def test_rotate_encrypted_key_invalid_password(manager, tmp_path):
 
     assert manager.is_active("alice-key-001") is True
     assert "alice-key-002" not in manager.keys
+    
+def test_key_lifecycle_persistence(tmp_path):
+    """Verify that key metadata persists across manager instances."""
+
+    registry_path = tmp_path / "registry.json"
+
+    # First application session
+    registry = KeyRegistry(str(registry_path))
+    manager = KeyLifecycleManager(registry)
+
+    manager.register_key("key-001")
+    manager.rotate_key("key-001", "key-002")
+    manager.revoke_key("key-002")
+
+    # Simulate restarting the application
+    new_registry = KeyRegistry(str(registry_path))
+    new_manager = KeyLifecycleManager(new_registry)
+
+    # Verify that both keys were recovered
+    old_key = new_manager.get_key("key-001")
+    new_key = new_manager.get_key("key-002")
+
+    assert old_key["status"] == "RETIRED"
+    assert old_key["replaced_by"] == "key-002"
+
+    assert new_key["status"] == "REVOKED"
+    assert new_key["replaced_by"] is None
+
+    assert new_manager.is_active("key-001") is False
+    assert new_manager.is_active("key-002") is False
+    
+def test_rotation_rollback_on_save_failure(tmp_path, monkeypatch):
+    """Verify that a failed save does not leave a partial rotation."""
+
+    registry_path = tmp_path / "registry.json"
+
+    registry = KeyRegistry(str(registry_path))
+    manager = KeyLifecycleManager(registry)
+
+    # Register the original key successfully
+    manager.register_key("key-001")
+
+    original_key = manager.get_key("key-001")
+
+    # Simulate a registry save failure
+    def failing_save():
+        raise RuntimeError("Simulated registry save failure")
+
+    monkeypatch.setattr(registry, "save_registry", failing_save)
+
+    # Rotation must fail
+    with pytest.raises(RuntimeError, match="Simulated registry save failure"):
+        manager.rotate_key("key-001", "key-002")
+
+    # Original key must remain unchanged
+    assert manager.get_key("key-001") == original_key
+
+    # Replacement key must not remain registered
+    with pytest.raises(KeyError):
+        manager.get_key("key-002")
+
+    # Verify the persisted registry was not modified
+    recovered_registry = KeyRegistry(str(registry_path))
+    recovered_manager = KeyLifecycleManager(recovered_registry)
+
+    assert recovered_manager.get_key("key-001") == original_key
+
+    with pytest.raises(KeyError):
+        recovered_manager.get_key("key-002")
