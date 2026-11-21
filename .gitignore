@@ -18,3 +18,13 @@ __pycache__/
 
 D2/demo_files/
 D2/keystore/
+
+# Private keys and encrypted keystores
+/D2/keys/
+
+# Local test files
+/D2/files/
+
+# Local public keys and recipient configuration
+/D2/public_keys/
+/D2/recipients/
