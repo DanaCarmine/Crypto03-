@@ -26,6 +26,23 @@ def unlock_private_key(
     purpose, and optionally its identity.
     """
 
+    # Validate input parameters before accessing the keystore.
+    if not isinstance(keystore_path, str) or not keystore_path.strip():
+        raise ValueError("A valid keystore path is required.")
+
+    if not isinstance(password, str) or not password:
+        raise ValueError("A non-empty password is required.")
+
+    if not isinstance(expected_algorithm, str) or not expected_algorithm:
+        raise ValueError("A valid expected algorithm is required.")
+
+    if not isinstance(expected_purpose, str) or not expected_purpose:
+        raise ValueError("A valid expected key purpose is required.")
+
+    if expected_key_id is not None:
+        if not isinstance(expected_key_id, str) or not expected_key_id.strip():
+            raise ValueError("A valid expected key identifier is required.")
+
     keystore = load_encrypted_key(keystore_path)
 
     if (
