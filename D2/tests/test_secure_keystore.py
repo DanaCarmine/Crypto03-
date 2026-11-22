@@ -242,3 +242,109 @@ def test_invalid_key_purpose():
             algorithm="secp256k1",
             purpose="signing",
         )
+def test_load_keystore_missing_field(tmp_path):
+    """
+    A keystore with missing required fields must be rejected.
+    """
+    import json
+
+    private_key, _ = generate_key_pair()
+    keystore = encrypt_private_key(private_key, TEST_PASSWORD)
+
+    del keystore["nonce"]
+
+    file_path = tmp_path / "missing_field.json"
+    file_path.write_text(json.dumps(keystore), encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        load_encrypted_key(str(file_path))
+
+
+def test_load_keystore_extra_field(tmp_path):
+    """
+    A keystore containing unexpected fields must be rejected.
+    """
+    import json
+
+    private_key, _ = generate_key_pair()
+    keystore = encrypt_private_key(private_key, TEST_PASSWORD)
+
+    keystore["unexpected_field"] = "malicious_data"
+
+    file_path = tmp_path / "extra_field.json"
+    file_path.write_text(json.dumps(keystore), encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        load_encrypted_key(str(file_path))
+
+
+def test_load_keystore_invalid_version(tmp_path):
+    """
+    Unsupported keystore versions must be rejected.
+    """
+    import json
+
+    private_key, _ = generate_key_pair()
+    keystore = encrypt_private_key(private_key, TEST_PASSWORD)
+
+    keystore["version"] = "99.0"
+
+    file_path = tmp_path / "invalid_version.json"
+    file_path.write_text(json.dumps(keystore), encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        load_encrypted_key(str(file_path))
+
+
+def test_load_keystore_invalid_nonce(tmp_path):
+    """
+    Invalid nonce lengths must be rejected during loading.
+    """
+    import json
+    import base64
+
+    private_key, _ = generate_key_pair()
+    keystore = encrypt_private_key(private_key, TEST_PASSWORD)
+
+    keystore["nonce"] = base64.b64encode(b"short").decode("utf-8")
+
+    file_path = tmp_path / "invalid_nonce.json"
+    file_path.write_text(json.dumps(keystore), encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        load_encrypted_key(str(file_path))
+
+import base64
+
+
+@pytest.mark.parametrize("field", ["salt", "nonce"])
+def test_modified_cryptographic_parameters(field):
+    """
+    Modifying the salt or nonce must prevent
+    successful private key recovery.
+    """
+    private_key, _ = generate_key_pair()
+
+    keystore = encrypt_private_key(
+        private_key,
+        TEST_PASSWORD,
+    )
+
+    modified = copy.deepcopy(keystore)
+
+    original = bytearray(
+        base64.b64decode(modified[field])
+    )
+
+    # Modify one byte without changing the field length.
+    original[0] ^= 0x01
+
+    modified[field] = base64.b64encode(
+        original
+    ).decode("utf-8")
+
+    with pytest.raises(ValueError, match="Access denied"):
+        decrypt_private_key(
+            modified,
+            TEST_PASSWORD,
+        )

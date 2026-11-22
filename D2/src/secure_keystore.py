@@ -381,6 +381,9 @@ def save_encrypted_key(keystore: dict, file_path: str) -> None:
 def load_encrypted_key(file_path: str) -> dict:
     """
     Load an encrypted private key from a JSON file.
+
+    Validate the complete keystore structure and
+    cryptographic parameters before returning it.
     """
     path = Path(file_path)
 
@@ -392,24 +395,6 @@ def load_encrypted_key(file_path: str) -> dict:
     with path.open("r", encoding="utf-8") as file:
         keystore = json.load(file)
 
-    if not isinstance(keystore, dict):
-        raise ValueError("Invalid keystore format.")
-
-    required_fields = {
-        "version",
-        "key_id",
-        "algorithm",
-        "purpose",
-        "kdf",
-        "encryption",
-        "salt",
-        "nonce",
-        "ciphertext"
-    }
-
-    if not required_fields.issubset(keystore.keys()):
-        raise ValueError(
-            "The keystore is missing required fields."
-        )
+    validate_keystore(keystore)
 
     return keystore
