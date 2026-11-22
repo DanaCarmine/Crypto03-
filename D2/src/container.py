@@ -210,7 +210,7 @@ def save_container(container, file_path):
         ciphertext
     )
 
-    with path.open("w", encoding="utf-8") as file:
+    with path.open("x", encoding="utf-8") as file:
         json.dump(
             container,
             file,

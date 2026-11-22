@@ -256,3 +256,33 @@ def test_load_invalid_recipient(vault_data, tmp_path):
 
     with pytest.raises(ValueError):
         load_container(file_path)
+
+
+def test_save_container_prevents_overwrite(vault_data, tmp_path):
+
+
+    """Verify that an existing vault file cannot be overwritten."""
+
+    metadata, recipients, nonce, ciphertext = vault_data
+
+    container = create_container(
+        metadata,
+        recipients,
+        nonce,
+        ciphertext
+    )
+
+    file_path = tmp_path / "protected.vault"
+
+    # Save the original container
+    save_container(container, file_path)
+
+    # Preserve the original content
+    original_content = file_path.read_bytes()
+
+    # Attempt to overwrite the existing file
+    with pytest.raises(FileExistsError):
+        save_container(container, file_path)
+
+    # Verify that the original file remains unchanged
+    assert file_path.read_bytes() == original_content
