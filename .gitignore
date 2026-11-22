@@ -28,3 +28,11 @@ D2/keystore/
 # Local public keys and recipient configuration
 /D2/public_keys/
 /D2/recipients/
+
+# Private keys and local test files
+/D2/keys/
+/D2/files/
+
+# Locally generated and exchanged public keys
+/D2/public_keys/
+/D2/recipients/
