@@ -19,10 +19,11 @@ def unlock_private_key(
     password: str,
     expected_algorithm: str,
     expected_purpose: str,
-    expected_key_id: str,
+    expected_key_id: str | None = None,
 ) -> bytes:
     """
-    Unlock a private key after checking its identity and purpose.
+    Unlock a private key after checking its algorithm,
+    purpose, and optionally its identity.
     """
 
     keystore = load_encrypted_key(keystore_path)
@@ -30,20 +31,27 @@ def unlock_private_key(
     if (
         keystore["algorithm"] != expected_algorithm
         or keystore["purpose"] != expected_purpose
-        or keystore["key_id"] != expected_key_id
     ):
         raise ValueError(
-            "Key identity, algorithm, or purpose mismatch."
+            "Key algorithm or purpose mismatch."
+        )
+
+    # Validate key identity when explicitly required
+    if (
+        expected_key_id is not None
+        and keystore["key_id"] != expected_key_id
+    ):
+        raise ValueError(
+            "Key identity mismatch."
         )
 
     return decrypt_private_key(keystore, password)
-
 
 def prompt_and_unlock_private_key(
     keystore_path: str,
     expected_algorithm: str,
     expected_purpose: str,
-    expected_key_id: str,
+    expected_key_id: str | None = None,
 ) -> bytes:
     """
     Prompt the user for a password and unlock the key.
@@ -53,11 +61,11 @@ def prompt_and_unlock_private_key(
 
     try:
         return unlock_private_key(
-            keystore_path,
-            password,
-            expected_algorithm,
-            expected_purpose,
-            expected_key_id,
+            keystore_path=keystore_path,
+            password=password,
+            expected_algorithm=expected_algorithm,
+            expected_purpose=expected_purpose,
+            expected_key_id=expected_key_id,
         )
     finally:
         password = None
